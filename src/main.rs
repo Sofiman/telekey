@@ -26,9 +26,9 @@ fn parse_args(args: Vec<String>) -> TelekeyConfig {
     for arg in args {
         if arg.starts_with('-') {
             for c in arg.chars().skip(1) {
-                #[allow(clippy::single_match)]
                 match c {
                     's' => { conf.set_mode(TelekeyMode::Server(8384)) },
+                    'r' => { conf.set_update_screen(false) } // raw display
                     _ => ()
                 }
             }

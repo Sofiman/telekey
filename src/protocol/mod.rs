@@ -1,9 +1,13 @@
 pub mod bindings;
 use crate::protocol::bindings::api::*;
-use console::Term;
+use chrono::{Utc, Duration};
+use console::{Term, style};
+use queue::Queue;
 use std::{io::{self, Read, Write, Error, ErrorKind}, net::*, borrow::Cow};
 use rand::{distributions::Alphanumeric, Rng};
 use quick_protobuf::{Writer, MessageWrite, deserialize_from_slice};
+
+const LATENCY_UPDATE_PERIOD: Option<usize> = Some(20);
 
 #[derive(Clone, Debug, Copy)]
 pub enum TelekeyMode {
@@ -15,7 +19,8 @@ pub enum TelekeyMode {
 pub struct TelekeyConfig {
     hostname: String,
     version: u32,
-    mode: TelekeyMode
+    mode: TelekeyMode,
+    update_screen: bool
 }
 
 impl TelekeyConfig {
@@ -30,6 +35,10 @@ impl TelekeyConfig {
     pub fn set_mode(&mut self, mode: TelekeyMode) {
         self.mode = mode;
     }
+
+    pub fn set_update_screen(&mut self, update_screen: bool) {
+        self.update_screen = update_screen;
+    }
 }
 
 impl Default for TelekeyConfig {
@@ -40,7 +49,8 @@ impl Default for TelekeyConfig {
                 _ => "Telekey Client".to_string()
             },
             version: 1,
-            mode: TelekeyMode::Client
+            mode: TelekeyMode::Client,
+            update_screen: true
         }
     }
 }
@@ -56,7 +66,8 @@ impl From<HandshakeRequest<'_>> for TelekeyConfig {
         Self {
             hostname: msg.hostname.to_string(),
             version: msg.version,
-            mode: TelekeyMode::Client
+            mode: TelekeyMode::Client,
+            update_screen: true
         }
     }
 }
@@ -109,7 +120,7 @@ impl From<console::Key> for KeyEvent {
 impl std::fmt::Display for KeyEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.kind {
-            KeyKind::ENTER => writeln!(f),
+            KeyKind::ENTER => write!(f, "\\n"),
             KeyKind::UP => write!(f, "[A^]"),
             KeyKind::DOWN => write!(f, "[Av]"),
             KeyKind::LEFT => write!(f, "[A<]"),
@@ -117,7 +128,7 @@ impl std::fmt::Display for KeyEvent {
             KeyKind::BACKSPACE => write!(f, "[BAK]"),
             KeyKind::INSERT => write!(f, "[INS]"),
             KeyKind::CHAR => write!(f, "{}", char::from_u32(self.key).unwrap()),
-            KeyKind::TAB => write!(f, "\t"),
+            KeyKind::TAB => write!(f, "\\t"),
             KeyKind::HOME => write!(f, "[HOM]"),
             KeyKind::ESC => write!(f, "[ESC]"),
             KeyKind::DELETE => write!(f, "[DEL]"),
@@ -161,7 +172,7 @@ impl Telekey {
                 state: TelekeyState::Idle
             };
             if let Err(e) = telekey.listen_loop(stream?) {
-                println!("<!> Got error {}", e);
+                println!("<!> Got error: {}", e);
             }
         }
         Ok(())
@@ -175,7 +186,7 @@ impl Telekey {
                 telekey.handshake(&mut stream)?;
 
                 if let Err(e) = telekey.listen_loop(stream) {
-                    println!("<!> Got error {}", e);
+                    println!("<!> Got error: {}", e);
                 }
 
                 io::Result::Ok(())
@@ -212,8 +223,7 @@ impl Telekey {
     }
 
     fn handle_packet(&mut self, stream: &mut TcpStream, kind: u8, len: u32)
-        -> io::Result<()>
-    {
+        -> io::Result<()> {
         let mut buf = vec![0; len as usize];
         stream.read_exact(&mut buf)?;
         match kind {
@@ -230,12 +240,6 @@ impl Telekey {
                         stream.shutdown(Shutdown::Both)?;
                         return io::Result::Err(Error::new(ErrorKind::NotConnected, "Invalid secret"));
                     }
-                    println!("-----------------------------");
-                    println!("Remote:");
-                    println!("\tIP: {:?}", target_ip);
-                    println!("\tName: `{}`", msg.hostname);
-                    println!("\tClient Version: {}", msg.version);
-                    println!("-----------------------------");
                     Self::send_packet(stream, 0, HandshakeResponse {
                         hostname: Cow::Borrowed(&self.remote.me.hostname),
                         version: self.remote.me.version
@@ -252,7 +256,8 @@ impl Telekey {
                     self.remote.put_remote(TelekeyConfig {
                         hostname: msg.hostname.to_string(),
                         version: msg.version,
-                        mode: TelekeyMode::Server(target_ip.port())
+                        mode: TelekeyMode::Server(target_ip.port()),
+                        update_screen: true
                     });
                 }
             },
@@ -266,6 +271,14 @@ impl Telekey {
                     print!("{}", msg);
                     io::stdout().flush()?;
                 }
+            },
+            2 => {
+                let tm = Utc::now().timestamp_nanos();
+                let mut buf: Vec<u8> = Vec::with_capacity(5 + 8);
+                buf.push(2);
+                buf.extend_from_slice(&(16u32).to_be_bytes());
+                buf.extend_from_slice(&tm.to_be_bytes());
+                stream.write_all(&buf)?;
             }
             _ => ()
         }
@@ -282,20 +295,105 @@ impl Telekey {
             io::Error::new(io::ErrorKind::Other, e))
     }
 
+    fn measure_latency(stream: &mut TcpStream) -> io::Result<i64> {
+        let mut packet = vec![0; 5 + 8];
+        let start = Utc::now().timestamp_nanos();
+        stream.write_all(&[2, 0, 0, 0, 0])?;
+        stream.read_exact(&mut packet)?;
+        let end = Utc::now().timestamp_nanos();
+        let middle = i64::from_be_bytes(packet[5..].try_into().unwrap());
+        let d1 = middle - start;
+        let d2 = end - middle;
+        Ok((d1 + d2) / 2)
+    }
+
+    fn print_header(&self, stream: &TcpStream) -> String
+    {
+        let name = style(format!("TeleKey v{} ", self.remote.me.version))
+            .color256(173).italic();
+        let peer = style(format!(" {} ", stream.peer_addr().unwrap()))
+            .bg(console::Color::Color256(239)).fg(console::Color::Magenta);
+        format!("{}{}", name, peer)
+    }
+
+    fn print_menu(&self, header: &str, latency: &str, history: &[KeyEvent]) {
+        let state = match self.state {
+            TelekeyState::Idle => style(" IDLE ").on_blue().black(),
+            TelekeyState::Active => style(" ACTIVE ").on_green().black(),
+        };
+
+        println!("{}{}{}", header, state, latency);
+        for l in history {
+            println!("{}", l);
+        }
+        println!("{}", style("--> Press any key <--").color256(246));
+    }
+
     fn wait_for_input(&mut self, stream: &mut TcpStream) -> io::Result<()> {
+        let header = self.print_header(stream);
         let term = Term::stdout();
-        loop {
-            match self.state {
-                TelekeyState::Idle => {
-                    if let Ok(_key) = term.read_key() {
-                        self.state = TelekeyState::Active;
-                        println!("switched to mode active");
+
+        let nano = Self::measure_latency(stream)?;
+        let mut latency = if let Ok(d) = Duration::nanoseconds(nano).to_std() {
+            style(format!(" {:?} ", d)).yellow()
+        } else {
+            style(" ??ms ".to_string()).yellow()
+        }.to_string();
+
+        term.clear_screen()?;
+        self.print_menu(&header, &latency, &[]);
+
+        if self.remote.me.update_screen {
+            let mut l = 0;
+            let mut history = Queue::with_capacity(20);
+            loop {
+                match self.state {
+                    TelekeyState::Idle => {
+                        if let Ok(_key) = term.read_key() {
+                            self.state = TelekeyState::Active;
+                        }
+                    },
+                    TelekeyState::Active => {
+                        if let Ok(key) = term.read_key() {
+                            let e: KeyEvent = key.into();
+                            Self::send_packet(stream, 1, e.clone())?;
+                            history.force_queue(e);
+                        }
                     }
-                },
-                TelekeyState::Active => {
-                    if let Ok(key) = term.read_key() {
-                        let e: KeyEvent = key.into();
-                        Self::send_packet(stream, 1, e)?;
+                }
+
+                if let Some(period) = LATENCY_UPDATE_PERIOD {
+                    if l == period { // after x reads, measure latency
+                        let nano = Self::measure_latency(stream)?;
+                        latency = if let Ok(d) = Duration::nanoseconds(nano).to_std() {
+                            style(format!(" {:?} ", d)).yellow()
+                        } else {
+                            style(" ??ms ".to_string()).yellow()
+                        }.to_string();
+                        l = 0;
+                    } else {
+                        l += 1;
+                    }
+                }
+
+                term.clear_screen()?;
+                self.print_menu(&header, &latency, history.vec());
+            }
+        } else {
+            loop {
+                match self.state {
+                    TelekeyState::Idle => {
+                        if let Ok(_key) = term.read_key() {
+                            self.state = TelekeyState::Active;
+                            term.clear_screen()?;
+                            self.print_menu(&header, &latency, &[]);
+                        }
+                    },
+                    TelekeyState::Active => {
+                        if let Ok(key) = term.read_key() {
+                            let e: KeyEvent = key.into();
+                            Self::send_packet(stream, 1, e.clone())?;
+                        }
                     }
                 }
             }
