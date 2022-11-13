@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+message HandshakeRequest {
+    string hostname = 1;
+    fixed32 version = 2;
+    bytes token = 3;
+}
+
+message HandshakeResponse {
+    string hostname = 1;
+    fixed32 version = 2;
+}
+
+enum KeyKind {
+    NONE = 0;
+    BACKSPACE = 1;
+    ENTER = 2;
+    LEFT = 3;
+    RIGHT = 4;
+    UP = 5;
+    DOWN = 6;
+    HOME = 7;
+    END = 8;
+    PAGEUP = 9;
+    PAGEDOWN = 10;
+    TAB = 11;
+    DELETE = 13;
+    INSERT = 14;
+    FUNCTION = 15;
+    CHAR = 16;
+    ESC = 17;
+}
+
+message KeyEvent {
+    bool pressed = 0;
+    KeyKind kind = 1;
+    uint32 key = 2;
+    uint32 modifiers = 3;
+}
