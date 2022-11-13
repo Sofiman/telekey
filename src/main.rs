@@ -29,7 +29,8 @@ fn parse_args(args: Vec<String>) -> TelekeyConfig {
                 match c {
                     's' => { conf.set_mode(TelekeyMode::Server(8384)) },
                     'r' => { conf.set_update_screen(false) } // raw display
-                    _ => ()
+                    'c' => { conf.set_cold_run(true) },
+                     _ => ()
                 }
             }
         }

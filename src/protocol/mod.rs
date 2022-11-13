@@ -3,6 +3,7 @@ use crate::protocol::bindings::api::*;
 use chrono::{Utc, Duration};
 use console::{Term, style};
 use queue::Queue;
+use enigo::{Enigo, KeyboardControllable};
 use std::{io::{self, Read, Write, Error, ErrorKind}, net::*, borrow::Cow};
 use rand::{distributions::Alphanumeric, Rng};
 use quick_protobuf::{Writer, MessageWrite, deserialize_from_slice};
@@ -20,7 +21,8 @@ pub struct TelekeyConfig {
     hostname: String,
     version: u32,
     mode: TelekeyMode,
-    update_screen: bool
+    update_screen: bool,
+    cold_run: bool
 }
 
 impl TelekeyConfig {
@@ -39,6 +41,10 @@ impl TelekeyConfig {
     pub fn set_update_screen(&mut self, update_screen: bool) {
         self.update_screen = update_screen;
     }
+
+    pub fn set_cold_run(&mut self, cold_run: bool) {
+        self.cold_run = cold_run;
+    }
 }
 
 impl Default for TelekeyConfig {
@@ -50,7 +56,8 @@ impl Default for TelekeyConfig {
             },
             version: 1,
             mode: TelekeyMode::Client,
-            update_screen: true
+            update_screen: true,
+            cold_run: false
         }
     }
 }
@@ -67,7 +74,8 @@ impl From<HandshakeRequest<'_>> for TelekeyConfig {
             hostname: msg.hostname.to_string(),
             version: msg.version,
             mode: TelekeyMode::Client,
-            update_screen: true
+            update_screen: true,
+            cold_run: false
         }
     }
 }
@@ -117,6 +125,16 @@ impl From<console::Key> for KeyEvent {
     }
 }
 
+impl From<KeyEvent> for enigo::Key {
+    fn from(e: KeyEvent) -> Self {
+        use KeyKind::*;
+        match e.kind {
+            CHAR => Self::Layout(char::from_u32(e.key).unwrap()),
+            _ => todo!("todo: press keys")
+        }
+    }
+}
+
 impl std::fmt::Display for KeyEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.kind {
@@ -143,13 +161,14 @@ impl std::fmt::Display for KeyEvent {
 
 pub struct Telekey {
     remote: TelekeyRemote,
-    state: TelekeyState
+    state: TelekeyState,
+    enigo: Enigo
 }
 
 impl Telekey {
     pub fn new(conf: TelekeyConfig) -> Self {
         let remote = TelekeyRemote { me: conf, secret: None, remote: None };
-        Telekey { remote, state: TelekeyState::Idle }
+        Telekey { remote, state: TelekeyState::Idle, enigo: Enigo::new() }
     }
 
     pub fn serve(port: u16, conf: TelekeyConfig) -> io::Result<()> {
@@ -169,7 +188,8 @@ impl Telekey {
                 secret: Some(secret), remote: None };
             let mut telekey = Telekey {
                 remote,
-                state: TelekeyState::Idle
+                state: TelekeyState::Idle,
+                enigo: Enigo::new()
             };
             if let Err(e) = telekey.listen_loop(stream?) {
                 println!("<!> Got error: {}", e);
@@ -257,7 +277,8 @@ impl Telekey {
                         hostname: msg.hostname.to_string(),
                         version: msg.version,
                         mode: TelekeyMode::Server(target_ip.port()),
-                        update_screen: true
+                        update_screen: true,
+                        cold_run: false
                     });
                 }
             },
@@ -268,8 +289,13 @@ impl Telekey {
                 if !self.remote.am_i_server() {
                     let msg: KeyEvent = deserialize_from_slice(&buf)
                         .expect("Cannot read KeyEvent message");
-                    print!("{}", msg);
-                    io::stdout().flush()?;
+
+                    if self.remote.me.cold_run {
+                        print!("{}", msg);
+                        io::stdout().flush()?;
+                    } else {
+                        self.enigo.key_down(msg.into());
+                    }
                 }
             },
             2 => {
