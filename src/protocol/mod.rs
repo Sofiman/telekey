@@ -1,8 +1,9 @@
 pub mod bindings;
 use crate::protocol::bindings::api::*;
 use chrono::{Utc, Duration};
+use enigo::{Enigo, KeyboardControllable};
 use console::{Term, style};
-use std::{io::{self, Read, Write, Error, ErrorKind}, thread, net::*, borrow::Cow, collections::VecDeque};
+use std::{io::{self, Read, Write, Error, ErrorKind}, net::*, borrow::Cow, collections::VecDeque};
 use rand::{distributions::Alphanumeric, Rng};
 use quick_protobuf::{Writer, MessageWrite, deserialize_from_slice};
 
@@ -117,30 +118,34 @@ impl From<console::Key> for KeyEvent {
             Insert => Self { kind: KeyKind::INSERT, ..Default::default() },
             PageUp => Self { kind: KeyKind::PAGEUP, ..Default::default() },
             PageDown => Self { kind: KeyKind::PAGEDOWN, ..Default::default() },
+            Shift => Self { kind: KeyKind::SHIFT, ..Default::default() },
             Char(x) => Self { kind: KeyKind::CHAR, key: x as u32, ..Default::default() },
-            _ => Self { kind: KeyKind::NONE, ..Default::default() },
+            _ => Self { kind: KeyKind::UNKNOWN, ..Default::default() },
         }
     }
 }
 
-impl From<KeyEvent> for rdev::Key {
-    fn from(e: KeyEvent) -> Self {
+impl Into<Result<enigo::Key, String>> for &KeyEvent {
+    fn into(self) -> Result<enigo::Key, String> {
         use KeyKind::*;
-        match e.kind {
-            ENTER => Self::Return,
-            UP => Self::UpArrow,
-            DOWN => Self::DownArrow,
-            LEFT => Self::LeftArrow,
-            RIGHT => Self::RightArrow,
-            BACKSPACE => Self::Backspace,
-            ESC => Self::Escape,
-            TAB => Self::Tab,
-            INSERT => Self::Insert,
-            END => Self::End,
-            DELETE => Self::Delete,
-            HOME => Self::Home,
-            CHAR => Self::Unknown(e.key),
-            _ => todo!("KeyEvent -> rdev::Key for {:?}", e.kind)
+        match self.kind {
+            ENTER => Ok(enigo::Key::Return),
+            UP => Ok(enigo::Key::UpArrow),
+            DOWN => Ok(enigo::Key::DownArrow),
+            LEFT => Ok(enigo::Key::LeftArrow),
+            RIGHT => Ok(enigo::Key::RightArrow),
+            ESC => Ok(enigo::Key::Escape),
+            BACKSPACE => Ok(enigo::Key::Backspace),
+            HOME => Ok(enigo::Key::Home),
+            END => Ok(enigo::Key::End),
+            TAB => Ok(enigo::Key::Tab),
+            DELETE => Ok(enigo::Key::Delete),
+            CHAR => Ok(enigo::Key::Layout(char::from_u32(self.key).unwrap())),
+            PAGEUP => Ok(enigo::Key::PageUp),
+            PAGEDOWN => Ok(enigo::Key::PageDown),
+            SHIFT => Ok(enigo::Key::Shift),
+            META => Ok(enigo::Key::Meta),
+            _ => Err(format!("From<KeyEvent> => enigo::Key for {:?}", self))
         }
     }
 }
@@ -164,20 +169,23 @@ impl std::fmt::Display for KeyEvent {
             KeyKind::PAGEDOWN => write!(f, "[Pv]"),
             KeyKind::END => write!(f, "[END]"),
             KeyKind::FUNCTION => write!(f, "[F{}]", self.key),
-            KeyKind::NONE => write!(f, "[?]")
+            KeyKind::SHIFT => write!(f, "[SHT]"),
+            KeyKind::META => write!(f, "[WIN|CMD]"),
+            KeyKind::UNKNOWN => write!(f, "[?]")
         }
     }
 }
 
 pub struct Telekey {
     remote: TelekeyRemote,
-    state: TelekeyState
+    state: TelekeyState,
+    enigo: Enigo
 }
 
 impl Telekey {
     pub fn new(conf: TelekeyConfig) -> Self {
         let remote = TelekeyRemote { me: conf, secret: None, remote: None };
-        Telekey { remote, state: TelekeyState::Idle }
+        Telekey { remote, state: TelekeyState::Idle, enigo: Enigo::new() }
     }
 
     pub fn serve(port: u16, conf: TelekeyConfig) -> io::Result<()> {
@@ -193,7 +201,7 @@ impl Telekey {
                      String::from_utf8(secret.clone()).unwrap());
             let remote = TelekeyRemote { me: conf.clone(),
                 secret: Some(secret), remote: None };
-            let mut telekey = Telekey { remote, state: TelekeyState::Idle };
+            let mut telekey = Telekey { remote, state: TelekeyState::Idle, enigo: Enigo::new() };
             if let Err(e) = telekey.listen_loop(stream?) {
                 println!("{}: {}", style("ERROR").red().bold(), e);
             }
@@ -298,20 +306,19 @@ impl Telekey {
                         io::stdout().flush()?;
                     } else {
                          // TODO: Support pressing and releasing keys rather than just pressing them
-                         let r = match msg.kind {
-                             KeyKind::NONE => Ok(()),
-                             _ => {
-                                let k: rdev::Key = msg.clone().into();
-                                rdev::simulate(&rdev::EventType::KeyPress(k))
-                                    .unwrap();
-                                thread::sleep(std::time::Duration::from_millis(20));
-                                rdev::simulate(&rdev::EventType::KeyRelease(k))
-                             }
-                         };
-                         if let Err(e) = r {
-                            println!("{} while receiving `{}`: {:?}", 
-                                     style("RUNTIME ERROR").yellow().bold(),
-                                     style(format!("{}", msg)).green(), e);
+                         if self.remote.me.cold_run {
+                            print!("{}", msg);
+                            io::stdout().flush()?;
+                        } else {
+                            let r: Result<enigo::Key, String> = (&msg).into();
+                            match r {
+                                Ok(k) => self.enigo.key_click(k),
+                                Err(e) => {
+                                    println!("{} while receiving `{}`: {:?}", 
+                                             style("RUNTIME ERROR").yellow().bold(),
+                                             style(format!("{}", msg)).green(), e);
+                                }
+                            }
                         }
                     }
                 }

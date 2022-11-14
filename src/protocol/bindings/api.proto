@@ -12,7 +12,7 @@ message HandshakeResponse {
 }
 
 enum KeyKind {
-    NONE = 0;
+    UNKNOWN = 0;
     BACKSPACE = 1;
     ENTER = 2;
     LEFT = 3;
@@ -29,10 +29,11 @@ enum KeyKind {
     FUNCTION = 15;
     CHAR = 16;
     ESC = 17;
+    SHIFT = 18;
+    META = 19;
 }
 
 message KeyEvent {
-    bool pressed = 0;
     KeyKind kind = 1;
     uint32 key = 2;
     uint32 modifiers = 3;

@@ -16,7 +16,7 @@ use super::*;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum KeyKind {
-    NONE = 0,
+    UNKNOWN = 0,
     BACKSPACE = 1,
     ENTER = 2,
     LEFT = 3,
@@ -33,18 +33,20 @@ pub enum KeyKind {
     FUNCTION = 15,
     CHAR = 16,
     ESC = 17,
+    SHIFT = 18,
+    META = 19,
 }
 
 impl Default for KeyKind {
     fn default() -> Self {
-        KeyKind::NONE
+        KeyKind::UNKNOWN
     }
 }
 
 impl From<i32> for KeyKind {
     fn from(i: i32) -> Self {
         match i {
-            0 => KeyKind::NONE,
+            0 => KeyKind::UNKNOWN,
             1 => KeyKind::BACKSPACE,
             2 => KeyKind::ENTER,
             3 => KeyKind::LEFT,
@@ -61,6 +63,8 @@ impl From<i32> for KeyKind {
             15 => KeyKind::FUNCTION,
             16 => KeyKind::CHAR,
             17 => KeyKind::ESC,
+            18 => KeyKind::SHIFT,
+            19 => KeyKind::META,
             _ => Self::default(),
         }
     }
@@ -69,7 +73,7 @@ impl From<i32> for KeyKind {
 impl<'a> From<&'a str> for KeyKind {
     fn from(s: &'a str) -> Self {
         match s {
-            "NONE" => KeyKind::NONE,
+            "UNKNOWN" => KeyKind::UNKNOWN,
             "BACKSPACE" => KeyKind::BACKSPACE,
             "ENTER" => KeyKind::ENTER,
             "LEFT" => KeyKind::LEFT,
@@ -86,6 +90,8 @@ impl<'a> From<&'a str> for KeyKind {
             "FUNCTION" => KeyKind::FUNCTION,
             "CHAR" => KeyKind::CHAR,
             "ESC" => KeyKind::ESC,
+            "SHIFT" => KeyKind::SHIFT,
+            "META" => KeyKind::META,
             _ => Self::default(),
         }
     }
@@ -167,7 +173,6 @@ impl<'a> MessageWrite for HandshakeResponse<'a> {
 
 #[derive(Debug, Default, PartialEq, Clone)]
 pub struct KeyEvent {
-    pub pressed: bool,
     pub kind: KeyKind,
     pub key: u32,
     pub modifiers: u32,
@@ -178,7 +183,6 @@ impl<'a> MessageRead<'a> for KeyEvent {
         let mut msg = Self::default();
         while !r.is_eof() {
             match r.next_tag(bytes) {
-                Ok(0) => msg.pressed = r.read_bool(bytes)?,
                 Ok(8) => msg.kind = r.read_enum(bytes)?,
                 Ok(16) => msg.key = r.read_uint32(bytes)?,
                 Ok(24) => msg.modifiers = r.read_uint32(bytes)?,
@@ -193,15 +197,13 @@ impl<'a> MessageRead<'a> for KeyEvent {
 impl MessageWrite for KeyEvent {
     fn get_size(&self) -> usize {
         0
-        + if self.pressed == false { 0 } else { 1 + sizeof_varint(*(&self.pressed) as u64) }
-        + if self.kind == api::KeyKind::NONE { 0 } else { 1 + sizeof_varint(*(&self.kind) as u64) }
+        + if self.kind == api::KeyKind::UNKNOWN { 0 } else { 1 + sizeof_varint(*(&self.kind) as u64) }
         + if self.key == 0u32 { 0 } else { 1 + sizeof_varint(*(&self.key) as u64) }
         + if self.modifiers == 0u32 { 0 } else { 1 + sizeof_varint(*(&self.modifiers) as u64) }
     }
 
     fn write_message<W: WriterBackend>(&self, w: &mut Writer<W>) -> Result<()> {
-        if self.pressed != false { w.write_with_tag(0, |w| w.write_bool(*&self.pressed))?; }
-        if self.kind != api::KeyKind::NONE { w.write_with_tag(8, |w| w.write_enum(*&self.kind as i32))?; }
+        if self.kind != api::KeyKind::UNKNOWN { w.write_with_tag(8, |w| w.write_enum(*&self.kind as i32))?; }
         if self.key != 0u32 { w.write_with_tag(16, |w| w.write_uint32(*&self.key))?; }
         if self.modifiers != 0u32 { w.write_with_tag(24, |w| w.write_uint32(*&self.modifiers))?; }
         Ok(())
