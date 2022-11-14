@@ -3,7 +3,8 @@ use crate::protocol::bindings::api::*;
 use chrono::{Utc, Duration};
 use enigo::{Enigo, KeyboardControllable};
 use console::{Term, style};
-use std::{io::{self, Read, Write, Error, ErrorKind}, net::*, borrow::Cow, collections::VecDeque};
+use std::{io::{self, Read, Write, Error, ErrorKind}, net::*, borrow::Cow};
+use std::collections::VecDeque;
 use rand::{distributions::Alphanumeric, Rng};
 use quick_protobuf::{Writer, MessageWrite, deserialize_from_slice};
 
@@ -178,7 +179,7 @@ impl Telekey {
         // accept connections and process them serially
         for stream in listener.incoming() {
             let secret: Vec<u8> = rand::thread_rng()
-                .sample_iter(&Alphanumeric).take(7).collect();
+                .sample_iter(&Alphanumeric).take(8).collect();
             println!("Enter this token to confirm: {}",
                      String::from_utf8(secret.clone()).unwrap());
             let mut telekey = Telekey {
@@ -202,28 +203,32 @@ impl Telekey {
                     session_id: None, remote: None,
                     state: TelekeyState::Idle, enigo: Enigo::new()
                 };
-                println!("Connected to the server!");
+                println!("{} connected to the server!",
+                    style("Successfully").green().bold());
                 telekey.handshake(&mut stream)?;
 
                 if let Err(e) = telekey.listen_loop(stream) {
                     println!("{}: {}", style("ERROR").red().bold(), e);
                 }
 
-                io::Result::Ok(())
+                Ok(())
             },
             Err(e) => {
                 println!("{}: Couldn't connect to server...",
                          style("ERROR").red().bold());
-                io::Result::Err(e)
+                Err(e)
             }
         }
     }
 
     fn handshake(&self, stream: &mut TcpStream) -> io::Result<()> {
         let mut inp = String::new();
-        print!("Connection token: ");
+        print!("Please enter token to continue: ");
         io::stdout().flush()?;
         io::stdin().read_line(&mut inp)?;
+        if inp.len() != 8 {
+            return Err(Error::new(ErrorKind::Other, "Invalid token"));
+        }
 
         let handshake = HandshakeRequest {
             hostname: Cow::Borrowed(&self.config.hostname),
@@ -252,7 +257,9 @@ impl Telekey {
                 if self.remote.is_some() {
                     return Ok(());
                 }
-                let target_ip = stream.peer_addr().unwrap();
+                let Ok(target_ip) = stream.peer_addr() else {
+                    return stream.shutdown(Shutdown::Both);
+                };
                 if self.is_server() {
                     let msg: HandshakeRequest = deserialize_from_slice(&buf)
                         .expect("Cannot read HandshakeRequest message");
@@ -261,7 +268,8 @@ impl Telekey {
                     let token: &[u8] = &msg.token;
                     if expected != token {
                         stream.shutdown(Shutdown::Both)?;
-                        return io::Result::Err(Error::new(ErrorKind::NotConnected, "Invalid secret"));
+                        return Err(Error::new(ErrorKind::NotConnected,
+                                "Invalid secret"));
                     }
                     Self::send_packet(stream, 0, HandshakeResponse {
                         hostname: Cow::Borrowed(&self.config.hostname),

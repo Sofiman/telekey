@@ -1,6 +1,9 @@
 # telekey
 Telekey is a remote keyboard interface for working on multiple computers at once.
 
+## Requirements
+- `libxdo-dev` for linux users.
+
 # Usage
 Subject to change.
 
