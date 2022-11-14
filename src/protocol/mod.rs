@@ -139,7 +139,8 @@ impl From<KeyEvent> for rdev::Key {
             END => Self::End,
             DELETE => Self::Delete,
             HOME => Self::Home,
-            _ => todo!("KeyEvent -> simulate::Key for {:?}", e.kind)
+            CHAR => Self::Unknown(e.key),
+            _ => todo!("KeyEvent -> rdev::Key for {:?}", e.kind)
         }
     }
 }
@@ -187,9 +188,7 @@ impl Telekey {
         // accept connections and process them serially
         for stream in listener.incoming() {
             let secret: Vec<u8> = rand::thread_rng()
-                .sample_iter(&Alphanumeric)
-                .take(7)
-                .collect();
+                .sample_iter(&Alphanumeric).take(7).collect();
             println!("Enter this token to confirm: {}",
                      String::from_utf8(secret.clone()).unwrap());
             let remote = TelekeyRemote { me: conf.clone(),
@@ -299,21 +298,17 @@ impl Telekey {
                         io::stdout().flush()?;
                     } else {
                          // TODO: Support pressing and releasing keys rather than just pressing them
-                        let r = match msg.kind {
-                            KeyKind::CHAR => {
-                                //rdev::simulate(char::from_u32(msg.key).unwrap())
-                                Ok(())
-                            },
-                            _ => {
+                         let r = match msg.kind {
+                             KeyKind::NONE => Ok(()),
+                             _ => {
                                 let k: rdev::Key = msg.clone().into();
                                 rdev::simulate(&rdev::EventType::KeyPress(k))
                                     .unwrap();
-                                let delay = std::time::Duration::from_millis(20);
-                                thread::sleep(delay);
+                                thread::sleep(std::time::Duration::from_millis(20));
                                 rdev::simulate(&rdev::EventType::KeyRelease(k))
-                            }
-                        };
-                        if let Err(e) = r {
+                             }
+                         };
+                         if let Err(e) = r {
                             println!("{} while receiving `{}`: {:?}", 
                                      style("RUNTIME ERROR").yellow().bold(),
                                      style(format!("{}", msg)).green(), e);
