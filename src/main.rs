@@ -4,8 +4,8 @@ use std::{io::{self, Write}, env};
 
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
-    let conf = parse_args(args);
-    match conf.mode() {
+    let (conf, mode) = parse_args(args);
+    match mode {
         TelekeyMode::Server(port) => Telekey::serve(port, conf),
         TelekeyMode::Client => {
             println!("Starting client as `{}`", conf.hostname());
@@ -21,13 +21,15 @@ fn main() -> std::io::Result<()> {
     }
 }
 
-fn parse_args(args: Vec<String>) -> TelekeyConfig {
+fn parse_args(args: Vec<String>) -> (TelekeyConfig, TelekeyMode) {
+    let mut mode = TelekeyMode::Client;
     let mut conf = TelekeyConfig::default();
+    // TODO: Add options with variables (ex: `-opt val -other-opt [...]`
     for arg in args {
         if arg.starts_with('-') {
             for c in arg.chars().skip(1) {
                 match c {
-                    's' => { conf.set_mode(TelekeyMode::Server(8384)) },
+                    's' => { mode = TelekeyMode::Server(8384) },
                     'r' => { conf.set_update_screen(false) } // raw display
                     'c' => { conf.set_cold_run(true) },
                      _ => ()
@@ -35,5 +37,5 @@ fn parse_args(args: Vec<String>) -> TelekeyConfig {
             }
         }
     }
-    conf
+    (conf, mode)
 }
