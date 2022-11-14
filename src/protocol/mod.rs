@@ -226,14 +226,15 @@ impl Telekey {
         print!("Please enter token to continue: ");
         io::stdout().flush()?;
         io::stdin().read_line(&mut inp)?;
-        if inp.len() != 8 {
+        let bytes = inp.trim().as_bytes();
+        if bytes.len() != 8 {
             return Err(Error::new(ErrorKind::Other, "Invalid token"));
         }
 
         let handshake = HandshakeRequest {
             hostname: Cow::Borrowed(&self.config.hostname),
             version: self.version,
-            token: Cow::Borrowed(inp.trim().as_bytes())
+            token: Cow::Borrowed(bytes)
         };
         Self::send_packet(stream, 0, handshake)
     }
