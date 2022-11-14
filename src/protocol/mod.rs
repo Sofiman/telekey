@@ -2,9 +2,8 @@ pub mod bindings;
 use crate::protocol::bindings::api::*;
 use chrono::{Utc, Duration};
 use console::{Term, style};
-use queue::Queue;
 use enigo::{Enigo, KeyboardControllable};
-use std::{io::{self, Read, Write, Error, ErrorKind}, net::*, borrow::Cow};
+use std::{io::{self, Read, Write, Error, ErrorKind}, net::*, borrow::Cow, collections::VecDeque};
 use rand::{distributions::Alphanumeric, Rng};
 use quick_protobuf::{Writer, MessageWrite, deserialize_from_slice};
 
@@ -192,7 +191,7 @@ impl Telekey {
                 enigo: Enigo::new()
             };
             if let Err(e) = telekey.listen_loop(stream?) {
-                println!("<!> Got error: {}", e);
+                println!("{}: {}", style("ERROR").red().bold(), e);
             }
         }
         Ok(())
@@ -206,13 +205,14 @@ impl Telekey {
                 telekey.handshake(&mut stream)?;
 
                 if let Err(e) = telekey.listen_loop(stream) {
-                    println!("<!> Got error: {}", e);
+                    println!("{}: {}", style("ERROR").red().bold(), e);
                 }
 
                 io::Result::Ok(())
             },
             Err(e) => {
-                println!("Couldn't connect to server...");
+                println!("{}: Couldn't connect to server...",
+                         style("ERROR").red().bold());
                 io::Result::Err(e)
             }
         }
@@ -270,9 +270,8 @@ impl Telekey {
                 } else {
                     let msg: HandshakeResponse = deserialize_from_slice(&buf)
                         .expect("Cannot read HandshakeResponse message");
-                    println!("-----------------------------");
-                    println!("Successfully connected to `{}`", msg.hostname);
-                    println!("-----------------------------");
+                    println!("{} {}", self.print_header(stream),
+                        style(msg.hostname.to_string()).cyan());
                     self.remote.put_remote(TelekeyConfig {
                         hostname: msg.hostname.to_string(),
                         version: msg.version,
@@ -342,15 +341,18 @@ impl Telekey {
         format!("{}{}", name, peer)
     }
 
-    fn print_menu(&self, header: &str, latency: &str, history: &[KeyEvent]) {
+    fn print_menu(&self, header: &str, latency: &str,
+                  history: Option<&VecDeque<KeyEvent>>) {
         let state = match self.state {
             TelekeyState::Idle => style(" IDLE ").on_blue().black(),
             TelekeyState::Active => style(" ACTIVE ").on_green().black(),
         };
 
         println!("{}{}{}", header, state, latency);
-        for l in history {
-            println!("{}", l);
+        if let Some(hist) = history {
+            for l in hist {
+                println!("{}", l);
+            }
         }
         println!("{}", style("--> Press any key <--").color256(246));
     }
@@ -366,12 +368,13 @@ impl Telekey {
             style(" ??ms ".to_string()).yellow()
         }.to_string();
 
-        term.clear_screen()?;
-        self.print_menu(&header, &latency, &[]);
 
         if self.remote.me.update_screen {
+            term.clear_screen()?;
+            self.print_menu(&header, &latency, None);
+
             let mut l = 0;
-            let mut history = Queue::with_capacity(20);
+            let mut history = VecDeque::with_capacity(20);
             loop {
                 match self.state {
                     TelekeyState::Idle => {
@@ -383,7 +386,10 @@ impl Telekey {
                         if let Ok(key) = term.read_key() {
                             let e: KeyEvent = key.into();
                             Self::send_packet(stream, 1, e.clone())?;
-                            history.force_queue(e);
+                            if history.len() == 20 {
+                                history.pop_front();
+                            }
+                            history.push_back(e);
                         }
                     }
                 }
@@ -403,22 +409,24 @@ impl Telekey {
                 }
 
                 term.clear_screen()?;
-                self.print_menu(&header, &latency, history.vec());
+                self.print_menu(&header, &latency, Some(&history));
             }
         } else {
+            self.print_menu(&header, &latency, None);
+
             loop {
                 match self.state {
                     TelekeyState::Idle => {
                         if let Ok(_key) = term.read_key() {
                             self.state = TelekeyState::Active;
-                            term.clear_screen()?;
-                            self.print_menu(&header, &latency, &[]);
+                            term.clear_last_lines(2)?;
+                            self.print_menu(&header, &latency, None);
                         }
                     },
                     TelekeyState::Active => {
                         if let Ok(key) = term.read_key() {
                             let e: KeyEvent = key.into();
-                            Self::send_packet(stream, 1, e.clone())?;
+                            Self::send_packet(stream, 1, e)?;
                         }
                     }
                 }
