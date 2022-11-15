@@ -4,9 +4,13 @@ use chrono::{Utc, Duration};
 use enigo::{Enigo, KeyboardControllable};
 use console::{Term, style};
 use std::{io::{self, Read, Write, Error, ErrorKind}, net::*, borrow::Cow};
+use std::sync::Arc;
+use openssl::ssl::{SslMethod, SslAcceptor, SslConnector, SslStream, SslFiletype};
 use std::collections::VecDeque;
 use rand::{distributions::Alphanumeric, Rng};
 use quick_protobuf::{Writer, MessageWrite, deserialize_from_slice};
+
+type TelekeySocket = SslStream<TcpStream>;
 
 #[derive(Clone, Debug, Copy)]
 pub enum TelekeyMode {
@@ -172,23 +176,33 @@ impl Telekey {
     }
 
     pub fn serve(port: u16, config: TelekeyConfig) -> io::Result<()> {
+        let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+        acceptor.set_private_key_file("key.pem", SslFiletype::PEM).unwrap();
+        acceptor.set_certificate_chain_file("certs.pem").unwrap();
+        acceptor.check_private_key().unwrap();
+        let acceptor = Arc::new(acceptor.build());
+
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
-        println!("Server listenning on {} as `{}`", addr, config.hostname);
         let listener = TcpListener::bind(addr)?;
+        println!("Server listenning on {} as `{}`", addr, config.hostname);
 
         // accept connections and process them serially
         for stream in listener.incoming() {
-            let secret: Vec<u8> = rand::thread_rng()
-                .sample_iter(&Alphanumeric).take(8).collect();
-            println!("Enter this token to confirm: {}",
-                     String::from_utf8(secret.clone()).unwrap());
-            let mut telekey = Telekey {
-                config: config.clone(), mode: TelekeyMode::Server(port),
-                version: 1, session_id: Some(secret), remote: None,
-                state: TelekeyState::Idle, enigo: Enigo::new()
-            };
-            if let Err(e) = telekey.listen_loop(stream?) {
-                println!("{}: {}", style("ERROR").red().bold(), e);
+            if let Ok(stream) = stream {
+                let secret: Vec<u8> = rand::thread_rng()
+                    .sample_iter(&Alphanumeric).take(8).collect();
+                println!("Enter this token to confirm: {}",
+                         String::from_utf8(secret.clone()).unwrap());
+                let mut telekey = Telekey {
+                    config: config.clone(), mode: TelekeyMode::Server(port),
+                    version: 1, session_id: Some(secret), remote: None,
+                    state: TelekeyState::Idle, enigo: Enigo::new()
+                };
+                let acceptor = acceptor.clone();
+                let stream = acceptor.accept(stream).unwrap();
+                if let Err(e) = telekey.listen_loop(stream) {
+                    println!("{}: {}", style("ERROR").red().bold(), e);
+                }
             }
         }
         Ok(())
@@ -197,14 +211,16 @@ impl Telekey {
     pub fn connect_to(addr: SocketAddr, config: TelekeyConfig)
         -> io::Result<()> {
         match TcpStream::connect(addr) {
-            Ok(mut stream) => {
+            Ok(stream) => {
                 let mut telekey = Telekey {
                     config, mode: TelekeyMode::Client, version: 1,
                     session_id: None, remote: None,
                     state: TelekeyState::Idle, enigo: Enigo::new()
                 };
+                let connector = SslConnector::builder(SslMethod::tls()).unwrap().build();
                 println!("{} connected to the server!",
                     style("Successfully").green().bold());
+                let mut stream = connector.connect("127.0.0.1", stream).unwrap();
                 telekey.handshake(&mut stream)?;
 
                 if let Err(e) = telekey.listen_loop(stream) {
@@ -221,7 +237,7 @@ impl Telekey {
         }
     }
 
-    fn handshake(&self, stream: &mut TcpStream) -> io::Result<()> {
+    fn handshake(&self, stream: &mut TelekeySocket) -> io::Result<()> {
         let mut inp = String::new();
         print!("Please enter token to continue: ");
         io::stdout().flush()?;
@@ -239,7 +255,7 @@ impl Telekey {
         Self::send_packet(stream, 0, handshake)
     }
 
-    fn listen_loop(&mut self, mut stream: TcpStream) -> io::Result<()> {
+    fn listen_loop(&mut self, mut stream: TelekeySocket) -> io::Result<()> {
         let mut header = [0u8; 5];
 
         loop {
@@ -249,7 +265,7 @@ impl Telekey {
         }
     }
 
-    fn handle_packet(&mut self, stream: &mut TcpStream, kind: u8, len: u32)
+    fn handle_packet(&mut self, stream: &mut TelekeySocket, kind: u8, len: u32)
         -> io::Result<()> {
         let mut buf = vec![0; len as usize];
         stream.read_exact(&mut buf)?;
@@ -258,8 +274,9 @@ impl Telekey {
                 if self.remote.is_some() {
                     return Ok(());
                 }
-                let Ok(target_ip) = stream.peer_addr() else {
-                    return stream.shutdown(Shutdown::Both);
+                let Ok(target_ip) = stream.get_ref().peer_addr() else {
+                    stream.shutdown().map_err(|e| Error::new(ErrorKind::Other, e))?;
+                    return Ok(())
                 };
                 if self.is_server() {
                     let msg: HandshakeRequest = deserialize_from_slice(&buf)
@@ -268,7 +285,7 @@ impl Telekey {
                         .expect("Server must have a valid session ID");
                     let token: &[u8] = &msg.token;
                     if expected != token {
-                        stream.shutdown(Shutdown::Both)?;
+                        stream.shutdown().map_err(|e| Error::new(ErrorKind::Other, e))?;
                         return Err(Error::new(ErrorKind::NotConnected,
                                 "Invalid secret"));
                     }
@@ -294,7 +311,8 @@ impl Telekey {
             },
             1 => {
                 if self.remote.is_none() {
-                    return stream.shutdown(Shutdown::Both);
+                    stream.shutdown().map_err(|e| Error::new(ErrorKind::Other, e))?;
+                    return Ok(())
                 }
                 if !self.is_server() {
                     let msg: KeyEvent = deserialize_from_slice(&buf)
@@ -335,7 +353,7 @@ impl Telekey {
         }
     }
 
-    fn send_packet<T: MessageWrite>(stream: &mut TcpStream, kind: u8, msg: T)
+    fn send_packet<T: MessageWrite, S: Write>(stream: &mut S, kind: u8, msg: T)
         -> io::Result<()> {
         let len = msg.get_size() + 1;
         stream.write_all(&[kind])?;
@@ -345,7 +363,7 @@ impl Telekey {
             io::Error::new(io::ErrorKind::Other, e))
     }
 
-    fn measure_latency(stream: &mut TcpStream) -> io::Result<i64> {
+    fn measure_latency(stream: &mut TelekeySocket) -> io::Result<i64> {
         let mut packet = vec![0; 5 + 8];
         let start = Utc::now().timestamp_nanos();
         stream.write_all(&[2, 0, 0, 0, 0])?;
@@ -357,11 +375,11 @@ impl Telekey {
         Ok((d1 + d2) / 2)
     }
 
-    fn print_header(&self, stream: &TcpStream) -> String
+    fn print_header(&self, stream: &TelekeySocket) -> String
     {
         let name = style(format!("TeleKey v{} ", self.version))
             .color256(173).italic();
-        let Ok(peer_addr) = stream.peer_addr() else {
+        let Ok(peer_addr) = stream.get_ref().peer_addr() else {
             return format!("{}{}", name, style("!! Unkown peer !!").on_red());
         };
         let peer = if let Some(remote) = &self.remote {
@@ -388,7 +406,7 @@ impl Telekey {
         println!("{}", style("--> Press any key <--").color256(246));
     }
 
-    fn wait_for_input(&mut self, stream: &mut TcpStream) -> io::Result<()> {
+    fn wait_for_input(&mut self, stream: &mut TelekeySocket) -> io::Result<()> {
         let header = self.print_header(stream);
         let term = Term::stdout();
 
