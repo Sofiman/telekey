@@ -5,7 +5,7 @@ use crate::transport::*;
 use chrono::{Utc, Duration};
 use enigo::{Enigo, KeyboardControllable};
 use console::{Term, style};
-use std::{io::{self, Write, Error, ErrorKind}, net::*, borrow::Cow, time::Instant};
+use std::{io::{self, Write, Error, ErrorKind}, net::*, borrow::Cow};
 use std::collections::VecDeque;
 use rand::{distributions::Alphanumeric, Rng};
 use quick_protobuf::deserialize_from_slice;
@@ -74,21 +74,21 @@ impl From<HandshakeRequest<'_>> for TelekeyRemote {
     }
 }
 
-impl Into<TelekeyPacket> for HandshakeRequest<'_> {
-    fn into(self) -> TelekeyPacket {
-        TelekeyPacket::new(TelekeyPacketKind::Handshake, self)
+impl From<HandshakeRequest<'_>> for TelekeyPacket {
+    fn from(p: HandshakeRequest<'_>) -> Self {
+        Self::new(TelekeyPacketKind::Handshake, p)
     }
 }
 
-impl Into<TelekeyPacket> for HandshakeResponse<'_> {
-    fn into(self) -> TelekeyPacket {
-        TelekeyPacket::new(TelekeyPacketKind::Handshake, self)
+impl From<HandshakeResponse<'_>> for TelekeyPacket {
+    fn from(p: HandshakeResponse<'_>) -> Self {
+        Self::new(TelekeyPacketKind::Handshake, p)
     }
 }
 
-impl Into<TelekeyPacket> for KeyEvent {
-    fn into(self) -> TelekeyPacket {
-        TelekeyPacket::new(TelekeyPacketKind::KeyEvent, self)
+impl From<KeyEvent> for TelekeyPacket {
+    fn from(p: KeyEvent) -> Self {
+        Self::new(TelekeyPacketKind::KeyEvent, p)
     }
 }
 
@@ -124,10 +124,10 @@ impl From<console::Key> for KeyEvent {
     }
 }
 
-impl Into<Result<enigo::Key, String>> for &KeyEvent {
-    fn into(self) -> Result<enigo::Key, String> {
+impl From<&KeyEvent> for Result<enigo::Key, String> {
+    fn from(e: &KeyEvent) -> Self {
         use KeyKind::*;
-        match self.kind {
+        match e.kind {
             ENTER => Ok(enigo::Key::Return),
             UP => Ok(enigo::Key::UpArrow),
             DOWN => Ok(enigo::Key::DownArrow),
@@ -139,12 +139,12 @@ impl Into<Result<enigo::Key, String>> for &KeyEvent {
             END => Ok(enigo::Key::End),
             TAB => Ok(enigo::Key::Tab),
             DELETE => Ok(enigo::Key::Delete),
-            CHAR => Ok(enigo::Key::Layout(char::from_u32(self.key).unwrap())),
+            CHAR => Ok(enigo::Key::Layout(char::from_u32(e.key).unwrap())),
             PAGEUP => Ok(enigo::Key::PageUp),
             PAGEDOWN => Ok(enigo::Key::PageDown),
             SHIFT => Ok(enigo::Key::Shift),
             META => Ok(enigo::Key::Meta),
-            _ => Err(format!("From<KeyEvent> => enigo::Key for {:?}", self))
+            _ => Err(format!("From<KeyEvent> => enigo::Key for {:?}", e))
         }
     }
 }
@@ -345,9 +345,9 @@ impl Telekey {
                 buf.extend_from_slice(&tm.to_be_bytes());
                 tr.send_packet(&TelekeyPacket::raw(buf))
             }
-            _ => {
+            k => {
                 println!("{}: Unknown packet {:?}",
-                     style("RUNTIME ERROR").yellow().bold(), p);
+                     style("RUNTIME ERROR").yellow().bold(), k);
                 Ok(())
             }
         }
@@ -383,7 +383,7 @@ impl Telekey {
             style(format!(" {} ({}) ", peer_addr, remote.hostname))
         } else {
             style(format!(" {} ", peer_addr))
-        }.bg(console::Color::Color256(239)).fg(console::Color::Magenta);
+        }.bg(console::Color::Color256(238)).fg(console::Color::Magenta);
         format!("{}{}", name, peer)
     }
 
@@ -454,9 +454,7 @@ impl Telekey {
                     }
                 }
 
-                let t = Instant::now();
                 term.clear_screen()?;
-                println!("clear took {:?}", t.elapsed());
                 self.print_menu(&header, &latency, Some(&history));
             }
         } else {
