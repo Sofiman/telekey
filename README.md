@@ -2,7 +2,7 @@
 Telekey is a remote keyboard interface for working on two computers at once.
 Pressed keys are transmitted using Protobuf over a TCP Connection (encryption WIP).
 
-⚠️_ _**Warning**__: Be careful while using this software in public places - no
+⚠️  __**Warning**__: Be careful while using this software in public places - no
 encryption yet - !
 
 ## Requirements
