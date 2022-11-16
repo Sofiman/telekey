@@ -178,7 +178,7 @@ impl Telekey {
     pub fn serve(port: u16, config: TelekeyConfig) -> io::Result<()> {
         let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
         acceptor.set_private_key_file("key.pem", SslFiletype::PEM).unwrap();
-        acceptor.set_certificate_chain_file("certs.pem").unwrap();
+        acceptor.set_certificate_chain_file("cert.pem").unwrap();
         acceptor.check_private_key().unwrap();
         let acceptor = Arc::new(acceptor.build());
 
@@ -217,7 +217,10 @@ impl Telekey {
                     session_id: None, remote: None,
                     state: TelekeyState::Idle, enigo: Enigo::new()
                 };
-                let connector = SslConnector::builder(SslMethod::tls()).unwrap().build();
+                let mut connector = SslConnector::builder(SslMethod::tls()).unwrap();
+                connector.set_verify(openssl::ssl::SslVerifyMode::NONE);
+                connector.set_ca_file("cert.pem").unwrap();
+                let connector = connector.build();
                 println!("{} connected to the server!",
                     style("Successfully").green().bold());
                 let mut stream = connector.connect("127.0.0.1", stream).unwrap();
@@ -341,7 +344,7 @@ impl Telekey {
                 let tm = Utc::now().timestamp_nanos();
                 let mut buf: Vec<u8> = Vec::with_capacity(5 + 8);
                 buf.push(2);
-                buf.extend_from_slice(&(16u32).to_be_bytes());
+                buf.extend_from_slice(&(4u32).to_be_bytes());
                 buf.extend_from_slice(&tm.to_be_bytes());
                 stream.write_all(&buf)
             }
@@ -356,11 +359,13 @@ impl Telekey {
     fn send_packet<T: MessageWrite, S: Write>(stream: &mut S, kind: u8, msg: T)
         -> io::Result<()> {
         let len = msg.get_size() + 1;
-        stream.write_all(&[kind])?;
-        stream.write_all(&(len as u32).to_be_bytes())?;
-        let mut writer = Writer::new(stream);
-        writer.write_message(&msg).map_err(|e|
-            io::Error::new(io::ErrorKind::Other, e))
+        let mut packet: Vec<u8> = Vec::with_capacity(5 + len);
+        packet.push(kind);
+        packet.extend_from_slice(&(len as u32).to_be_bytes());
+        Writer::new(&mut packet).write_message(&msg).map_err(|e|
+            io::Error::new(io::ErrorKind::Other, e))?;
+
+        stream.write_all(&packet)
     }
 
     fn measure_latency(stream: &mut TelekeySocket) -> io::Result<i64> {
