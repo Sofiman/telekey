@@ -10,4 +10,4 @@ quick-protobuf = "0.8.0"
 console = "0.15.2"
 chrono = { version = "0.4.23", features = ["clock", "std"], default-features = false }
 enigo = { git = "https://github.com/NaokiM03/enigo.git" }
-openssl = "0.10.42"
+ring = "0.16.20"
