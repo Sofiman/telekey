@@ -113,7 +113,7 @@ impl<'a> MessageRead<'a> for HandshakeRequest<'a> {
                 Ok(10) => msg.hostname = r.read_string(bytes).map(Cow::Borrowed)?,
                 Ok(21) => msg.version = r.read_fixed32(bytes)?,
                 Ok(26) => msg.token = r.read_bytes(bytes).map(Cow::Borrowed)?,
-                Ok(26) => msg.pkey = r.read_bytes(bytes).map(Cow::Borrowed)?,
+                Ok(34) => msg.pkey = r.read_bytes(bytes).map(Cow::Borrowed)?,
                 Ok(t) => { r.read_unknown(bytes, t)?; }
                 Err(e) => return Err(e),
             }
@@ -135,7 +135,7 @@ impl<'a> MessageWrite for HandshakeRequest<'a> {
         if self.hostname != "" { w.write_with_tag(10, |w| w.write_string(&**&self.hostname))?; }
         if self.version != 0u32 { w.write_with_tag(21, |w| w.write_fixed32(*&self.version))?; }
         if self.token != Cow::Borrowed(b"") { w.write_with_tag(26, |w| w.write_bytes(&**&self.token))?; }
-        if self.pkey != Cow::Borrowed(b"") { w.write_with_tag(26, |w| w.write_bytes(&**&self.pkey))?; }
+        if self.pkey != Cow::Borrowed(b"") { w.write_with_tag(34, |w| w.write_bytes(&**&self.pkey))?; }
         Ok(())
     }
 }

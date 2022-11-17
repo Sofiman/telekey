@@ -91,8 +91,8 @@ impl TelekeyTransport for TcpTransport {
     }
 
     fn send_packet(&mut self, mut p: TelekeyPacket) -> io::Result<()> {
-        self.stream.write_all(&p.len.to_be_bytes())?;
         p.payload.push(p.kind().into());
+        self.stream.write_all(&p.len.to_be_bytes())?;
         self.stream.write_all(&p.payload)
     }
 
@@ -105,9 +105,21 @@ impl TelekeyTransport for TcpTransport {
     }
 }
 
+impl TcpTransport {
+    pub fn stream(&self) -> &TcpStream {
+        &self.stream
+    }
+}
+
 impl From<TcpStream> for TcpTransport {
     fn from(stream: TcpStream) -> Self {
         Self { stream }
+    }
+}
+
+impl From<TcpTransport> for TcpStream {
+    fn from(tr: TcpTransport) -> Self {
+        tr.stream
     }
 }
 
@@ -128,16 +140,16 @@ impl TelekeyTransport for KexTransport {
         self.stream.read_exact(&mut header)?;
         let len = u32::from_be_bytes(header);
 
-        let mut buf = vec![0; len as usize + 1];
+        let mut buf = vec![0; len as usize];
         self.stream.read_exact(&mut buf)?;
         let mut buf = aead::open(self.keys.receiving(), &buf).unwrap();
-        Ok(TelekeyPacket::raw(buf.pop().unwrap().into(), len, buf))
+        Ok(TelekeyPacket::raw(buf.pop().unwrap().into(), buf.len() as u32, buf))
     }
 
     fn send_packet(&mut self, mut p: TelekeyPacket) -> io::Result<()> {
         p.payload.push(p.kind().into());
         let msg = aead::seal(self.keys.transport(), &p.payload).unwrap();
-        self.stream.write_all(&p.len().to_be_bytes())?;
+        self.stream.write_all(&(msg.len() as u32).to_be_bytes())?;
         self.stream.write_all(&msg)
     }
 
