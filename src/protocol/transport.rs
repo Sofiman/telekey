@@ -1,5 +1,6 @@
 use std::{io::{self, Write, Read}, net::{TcpStream, SocketAddr}};
 use quick_protobuf::{MessageWrite, Writer};
+use orion::{kex::SessionKeys, aead};
 
 #[derive(Default, Debug, Clone, Copy)]
 pub enum TelekeyPacketKind {
@@ -34,6 +35,7 @@ impl Into<u8> for TelekeyPacketKind {
 
 #[derive(Debug, Clone)]
 pub struct TelekeyPacket {
+    len: u32,
     kind: TelekeyPacketKind,
     payload: Vec<u8>
 }
@@ -41,36 +43,33 @@ pub struct TelekeyPacket {
 impl TelekeyPacket {
     pub fn new<T: MessageWrite>(kind: TelekeyPacketKind, msg: T) -> Self {
         let len = msg.get_size() + 1;
-        let mut payload: Vec<u8> = Vec::with_capacity(5 + len);
-        payload.push(kind.into());
-        payload.extend_from_slice(&(len as u32).to_be_bytes());
+        let mut payload: Vec<u8> = Vec::with_capacity(len);
         Writer::new(&mut payload).write_message(&msg)
             .expect("The payload should have been large enough");
-        Self { kind, payload }
+        Self { kind, len: len as u32, payload }
     }
 
-    pub fn raw(payload: Vec<u8>) -> Self {
-        assert!(payload.len() >= 5);
-        Self { kind: payload[0].into(), payload }
+    pub fn raw(kind: TelekeyPacketKind, len: u32, payload: Vec<u8>) -> Self {
+        Self { kind, len, payload }
     }
 
     pub fn kind(&self) -> TelekeyPacketKind {
         self.kind
     }
 
-    pub fn payload(&self) -> &[u8] {
-        &self.payload
+    pub fn len(&self) -> u32 {
+        self.len
     }
 
     pub fn data(&self) -> &[u8] {
-        &self.payload[5..]
+        &self.payload
     }
 }
 
 pub trait TelekeyTransport {
     /// blocking function
     fn recv_packet(&mut self) -> io::Result<TelekeyPacket>;
-    fn send_packet(&mut self, p: &TelekeyPacket) -> io::Result<()>;
+    fn send_packet(&mut self, p: TelekeyPacket) -> io::Result<()>;
     fn shutdown(&mut self) -> io::Result<()>;
     fn peer_addr(&mut self) -> io::Result<SocketAddr>;
 }
@@ -81,22 +80,19 @@ pub struct TcpTranspport {
 
 impl TelekeyTransport for TcpTranspport {
     fn recv_packet(&mut self) -> io::Result<TelekeyPacket> {
-        let mut header = [0u8; 5];
+        let mut header = [0u8; 4];
         self.stream.read_exact(&mut header)?;
-
         // deduce remaining bytes to read
-        let len = u32::from_be_bytes(header[1..].try_into().unwrap());
-        if len == 0 {
-            return Ok(TelekeyPacket::raw(header.to_vec()));
-        }
-        let mut buf = vec![0; len as usize + 5];
+        let len = u32::from_be_bytes(header);
 
-        self.stream.read_exact(&mut buf[5..])?;
-        buf.splice(..5, header);
-        Ok(TelekeyPacket::raw(buf))
+        let mut buf = vec![0; len as usize + 1];
+        self.stream.read_exact(&mut buf)?;
+        Ok(TelekeyPacket::raw(buf.pop().unwrap().into(), len, buf))
     }
 
-    fn send_packet(&mut self, p: &TelekeyPacket) -> io::Result<()> {
+    fn send_packet(&mut self, mut p: TelekeyPacket) -> io::Result<()> {
+        self.stream.write_all(&p.len.to_be_bytes())?;
+        p.payload.push(p.kind().into());
         self.stream.write_all(&p.payload)
     }
 
@@ -112,5 +108,44 @@ impl TelekeyTransport for TcpTranspport {
 impl From<TcpStream> for TcpTranspport {
     fn from(stream: TcpStream) -> Self {
         Self { stream }
+    }
+}
+
+pub struct KexTransport {
+    stream: TcpStream,
+    keys: SessionKeys
+}
+
+impl KexTransport {
+    pub fn new(stream: TcpStream, keys: SessionKeys) -> Self {
+        Self { stream, keys }
+    }
+}
+
+impl TelekeyTransport for KexTransport {
+    fn recv_packet(&mut self) -> io::Result<TelekeyPacket> {
+        let mut header = [0; 4];
+        self.stream.read_exact(&mut header)?;
+        let len = u32::from_be_bytes(header);
+
+        let mut buf = vec![0; len as usize + 1];
+        self.stream.read_exact(&mut buf)?;
+        let mut buf = aead::open(self.keys.receiving(), &buf).unwrap();
+        Ok(TelekeyPacket::raw(buf.pop().unwrap().into(), len, buf))
+    }
+
+    fn send_packet(&mut self, mut p: TelekeyPacket) -> io::Result<()> {
+        p.payload.push(p.kind().into());
+        let msg = aead::seal(self.keys.transport(), &p.payload).unwrap();
+        self.stream.write_all(&p.len().to_be_bytes())?;
+        self.stream.write_all(&msg)
+    }
+
+    fn shutdown(&mut self) -> io::Result<()> {
+        self.stream.shutdown(std::net::Shutdown::Both)
+    }
+
+    fn peer_addr(&mut self) -> io::Result<SocketAddr> {
+        self.stream.peer_addr()
     }
 }

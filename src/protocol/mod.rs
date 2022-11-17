@@ -258,7 +258,7 @@ impl Telekey {
             version: self.version,
             token: Cow::Borrowed(bytes)
         };
-        tr.send_packet(&p.into())
+        tr.send_packet(p.into())
     }
 
     fn listen_loop<T: TelekeyTransport>(&mut self, mut tr: T) -> io::Result<()> {
@@ -289,7 +289,7 @@ impl Telekey {
                         return Err(Error::new(ErrorKind::NotConnected,
                                 "Invalid secret"));
                     }
-                    tr.send_packet(&HandshakeResponse {
+                    tr.send_packet(HandshakeResponse {
                         hostname: Cow::Borrowed(&self.config.hostname),
                         version: self.version
                     }.into())?;
@@ -338,12 +338,9 @@ impl Telekey {
             },
             TelekeyPacketKind::Ping => {
                 let tm = Utc::now().timestamp_nanos();
-                let len = std::mem::size_of::<i64>();
-                let mut buf: Vec<u8> = Vec::with_capacity(5 + len);
-                buf.push(2);
-                buf.extend_from_slice(&(len as u32).to_be_bytes());
-                buf.extend_from_slice(&tm.to_be_bytes());
-                tr.send_packet(&TelekeyPacket::raw(buf))
+                let len = std::mem::size_of::<i64>() as u32;
+                let buf: Vec<u8> = tm.to_be_bytes().to_vec();
+                tr.send_packet(TelekeyPacket::raw(TelekeyPacketKind::Ping, len, buf))
             }
             k => {
                 println!("{}: Unknown packet {:?}",
@@ -355,7 +352,8 @@ impl Telekey {
 
     fn measure_latency<T: TelekeyTransport>(tr: &mut T) -> io::Result<i64> {
         let start = Utc::now().timestamp_nanos();
-        tr.send_packet(&TelekeyPacket::raw(vec![2, 0, 0, 0, 0]))?;
+        tr.send_packet(TelekeyPacket::raw(TelekeyPacketKind::Ping, 0,
+                Vec::with_capacity(1)))?;
         let p = tr.recv_packet()?;
         match p.kind() {
             TelekeyPacketKind::Ping => {
@@ -431,7 +429,7 @@ impl Telekey {
                         if let Ok(key) = term.read_key() {
                             let e: KeyEvent = key.into();
                             let p: TelekeyPacket = e.clone().into();
-                            tr.send_packet(&p)?;
+                            tr.send_packet(p)?;
                             if history.len() == 20 {
                                 history.pop_front();
                             }
@@ -474,7 +472,7 @@ impl Telekey {
                         if let Ok(key) = term.read_key() {
                             let e: KeyEvent = key.into();
                             let e: TelekeyPacket = e.into();
-                            tr.send_packet(&e)?;
+                            tr.send_packet(e)?;
                         }
                     }
                 }
