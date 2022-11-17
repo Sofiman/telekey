@@ -35,7 +35,6 @@ impl Into<u8> for TelekeyPacketKind {
 
 #[derive(Debug, Clone)]
 pub struct TelekeyPacket {
-    len: u32,
     kind: TelekeyPacketKind,
     payload: Vec<u8>
 }
@@ -46,19 +45,15 @@ impl TelekeyPacket {
         let mut payload: Vec<u8> = Vec::with_capacity(len);
         Writer::new(&mut payload).write_message(&msg)
             .expect("The payload should have been large enough");
-        Self { kind, len: len as u32, payload }
+        Self { kind, payload }
     }
 
-    pub fn raw(kind: TelekeyPacketKind, len: u32, payload: Vec<u8>) -> Self {
-        Self { kind, len, payload }
+    pub fn raw(kind: TelekeyPacketKind, payload: Vec<u8>) -> Self {
+        Self { kind, payload }
     }
 
     pub fn kind(&self) -> TelekeyPacketKind {
         self.kind
-    }
-
-    pub fn len(&self) -> u32 {
-        self.len
     }
 
     pub fn data(&self) -> &[u8] {
@@ -71,7 +66,7 @@ pub trait TelekeyTransport {
     fn recv_packet(&mut self) -> io::Result<TelekeyPacket>;
     fn send_packet(&mut self, p: TelekeyPacket) -> io::Result<()>;
     fn shutdown(&mut self) -> io::Result<()>;
-    fn peer_addr(&mut self) -> io::Result<SocketAddr>;
+    fn peer_addr(&self) -> io::Result<SocketAddr>;
 }
 
 pub struct TcpTransport {
@@ -82,17 +77,21 @@ impl TelekeyTransport for TcpTransport {
     fn recv_packet(&mut self) -> io::Result<TelekeyPacket> {
         let mut header = [0u8; 4];
         self.stream.read_exact(&mut header)?;
-        // deduce remaining bytes to read
-        let len = u32::from_be_bytes(header);
+        let len = u32::from_be_bytes(header); // deduce remaining bytes to read
 
-        let mut buf = vec![0; len as usize + 1];
+        if len == 0 {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput,
+                  "Zero length packet received"));
+        }
+
+        let mut buf = vec![0; len as usize];
         self.stream.read_exact(&mut buf)?;
-        Ok(TelekeyPacket::raw(buf.pop().unwrap().into(), len, buf))
+        Ok(TelekeyPacket::raw(buf.pop().unwrap().into(), buf))
     }
 
     fn send_packet(&mut self, mut p: TelekeyPacket) -> io::Result<()> {
         p.payload.push(p.kind().into());
-        self.stream.write_all(&p.len.to_be_bytes())?;
+        self.stream.write_all(&(p.payload.len() as u32).to_be_bytes())?;
         self.stream.write_all(&p.payload)
     }
 
@@ -100,7 +99,7 @@ impl TelekeyTransport for TcpTransport {
         self.stream.shutdown(std::net::Shutdown::Both)
     }
 
-    fn peer_addr(&mut self) -> io::Result<SocketAddr> {
+    fn peer_addr(&self) -> io::Result<SocketAddr> {
         self.stream.peer_addr()
     }
 }
@@ -136,14 +135,19 @@ impl KexTransport {
 
 impl TelekeyTransport for KexTransport {
     fn recv_packet(&mut self) -> io::Result<TelekeyPacket> {
-        let mut header = [0; 4];
+        let mut header = [0u8; 4];
         self.stream.read_exact(&mut header)?;
-        let len = u32::from_be_bytes(header);
+        let len = u32::from_be_bytes(header); // deduce remaining bytes to read
+
+        if len == 0 {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput,
+                  "Zero length packet received"));
+        }
 
         let mut buf = vec![0; len as usize];
         self.stream.read_exact(&mut buf)?;
         let mut buf = aead::open(self.keys.receiving(), &buf).unwrap();
-        Ok(TelekeyPacket::raw(buf.pop().unwrap().into(), buf.len() as u32, buf))
+        Ok(TelekeyPacket::raw(buf.pop().unwrap().into(), buf))
     }
 
     fn send_packet(&mut self, mut p: TelekeyPacket) -> io::Result<()> {
@@ -157,7 +161,7 @@ impl TelekeyTransport for KexTransport {
         self.stream.shutdown(std::net::Shutdown::Both)
     }
 
-    fn peer_addr(&mut self) -> io::Result<SocketAddr> {
+    fn peer_addr(&self) -> io::Result<SocketAddr> {
         self.stream.peer_addr()
     }
 }

@@ -32,6 +32,7 @@ fn parse_args(args: Vec<String>) -> (TelekeyConfig, TelekeyMode) {
                     's' => { mode = TelekeyMode::Server(8384) },
                     'r' => { conf.set_update_screen(false) } // raw display
                     'c' => { conf.set_cold_run(true) },
+                    'u' => { conf.set_secure(false) },
                      _ => ()
                 }
             }

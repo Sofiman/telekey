@@ -251,11 +251,17 @@ impl Telekey {
                 if telekey.config.secure {
                     let stream = telekey.sec_handshake(stream)?;
 
+                    println!("{}{}", telekey.print_header(stream.peer_addr().ok()),
+                        style(" ACTIVE ").on_green().black());
+
                     if let Err(e) = telekey.listen_loop(stream) {
                         println!("{}: {}", style("ERROR").red().bold(), e);
                     }
                 } else {
                     let stream = telekey.handshake(stream)?;
+
+                    println!("{}{}", telekey.print_header(stream.peer_addr().ok()),
+                        style(" ACTIVE ").on_green().black());
 
                     if let Err(e) = telekey.listen_loop(stream) {
                         println!("{}: {}", style("ERROR").red().bold(), e);
@@ -295,7 +301,6 @@ impl Telekey {
                 return Err(Error::new(ErrorKind::NotConnected,
                         "Invalid public key"));
             }
-            println!("my public key: {:?}", session.public_key().to_bytes());
             tr.send_packet(HandshakeResponse {
                 hostname: Cow::Borrowed(&self.config.hostname),
                 version: self.version,
@@ -305,10 +310,8 @@ impl Telekey {
 
             let key: &[u8] = &msg.pkey;
             let key: [u8; 32] = key.try_into().unwrap();
-            println!("received public key: {:?}", key);
-            let key: PublicKey = key.into();
             let server_keys: SessionKeys = session
-                .establish_with_client(&key).unwrap();
+                .establish_with_client(&key.into()).unwrap();
             println!("Key exchange successful!");
             Ok(KexTransport::new(tr.into(), server_keys))
         } else {
@@ -322,7 +325,6 @@ impl Telekey {
             }
 
             let session = EphemeralClientSession::new().unwrap();
-            println!("my public key: {:?}", session.public_key().to_bytes());
             tr.send_packet(HandshakeRequest {
                 hostname: Cow::Borrowed(&self.config.hostname),
                 version: self.version,
@@ -330,9 +332,7 @@ impl Telekey {
                 pkey: Cow::Borrowed(&session.public_key().to_bytes())
             }.into())?;
 
-            println!("Waiting for response");
             let p = tr.recv_packet()?;
-            println!("Got response");
             let msg: HandshakeResponse = deserialize_from_slice(p.data())
                 .expect("Cannot read HandshakeResponse message");
             self.remote = Some(TelekeyRemote {
@@ -340,15 +340,11 @@ impl Telekey {
                 version: msg.version,
                 mode: TelekeyMode::Server(target_ip.port()),
             });
-            println!("{}{}", self.print_header(Some(target_ip)),
-                style(" ACTIVE ").on_green().black());
 
             let key: &[u8] = &msg.pkey;
             let key: [u8; 32] = key.try_into().unwrap();
-            println!("received public key: {:?}", key);
-            let key: PublicKey = key.into();
             let client_keys: SessionKeys = session
-                .establish_with_server(&key).unwrap();
+                .establish_with_server(&key.into()).unwrap();
             println!("Key exchange successful!");
             Ok(KexTransport::new(tr.into(), client_keys))
         }
@@ -397,9 +393,7 @@ impl Telekey {
             };
             tr.send_packet(p.into())?;
 
-            println!("Waiting for response");
             let p = tr.recv_packet()?;
-            println!("Got response");
             let msg: HandshakeResponse = deserialize_from_slice(p.data())
                 .expect("Cannot read HandshakeResponse message");
             self.remote = Some(TelekeyRemote {
@@ -407,8 +401,6 @@ impl Telekey {
                 version: msg.version,
                 mode: TelekeyMode::Server(target_ip.port()),
             });
-            println!("{}{}", self.print_header(Some(target_ip)),
-                style(" ACTIVE ").on_green().black());
             Ok(tr)
         }
     }
@@ -453,9 +445,8 @@ impl Telekey {
             },
             TelekeyPacketKind::Ping => {
                 let tm = Utc::now().timestamp_nanos();
-                let len = std::mem::size_of::<i64>() as u32;
                 let buf: Vec<u8> = tm.to_be_bytes().to_vec();
-                tr.send_packet(TelekeyPacket::raw(TelekeyPacketKind::Ping, len, buf))
+                tr.send_packet(TelekeyPacket::raw(TelekeyPacketKind::Ping, buf))
             }
             k => {
                 println!("{}: Unknown packet {:?}",
@@ -467,7 +458,7 @@ impl Telekey {
 
     fn measure_latency<T: TelekeyTransport>(tr: &mut T) -> io::Result<i64> {
         let start = Utc::now().timestamp_nanos();
-        tr.send_packet(TelekeyPacket::raw(TelekeyPacketKind::Ping, 0,
+        tr.send_packet(TelekeyPacket::raw(TelekeyPacketKind::Ping,
                 Vec::with_capacity(1)))?;
         let p = tr.recv_packet()?;
         match p.kind() {
