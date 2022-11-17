@@ -74,11 +74,11 @@ pub trait TelekeyTransport {
     fn peer_addr(&mut self) -> io::Result<SocketAddr>;
 }
 
-pub struct TcpTranspport {
+pub struct TcpTransport {
     stream: TcpStream
 }
 
-impl TelekeyTransport for TcpTranspport {
+impl TelekeyTransport for TcpTransport {
     fn recv_packet(&mut self) -> io::Result<TelekeyPacket> {
         let mut header = [0u8; 4];
         self.stream.read_exact(&mut header)?;
@@ -105,7 +105,7 @@ impl TelekeyTransport for TcpTranspport {
     }
 }
 
-impl From<TcpStream> for TcpTranspport {
+impl From<TcpStream> for TcpTransport {
     fn from(stream: TcpStream) -> Self {
         Self { stream }
     }

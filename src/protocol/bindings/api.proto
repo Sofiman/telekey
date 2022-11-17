@@ -4,11 +4,13 @@ message HandshakeRequest {
     string hostname = 1;
     fixed32 version = 2;
     bytes token = 3;
+    optional bytes pkey = 3;
 }
 
 message HandshakeResponse {
     string hostname = 1;
     fixed32 version = 2;
+    optional bytes pkey = 3;
 }
 
 enum KeyKind {

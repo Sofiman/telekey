@@ -8,6 +8,7 @@ use console::{Term, style};
 use std::{io::{self, Write, Error, ErrorKind}, net::*, borrow::Cow};
 use std::collections::VecDeque;
 use rand::{distributions::Alphanumeric, Rng};
+//use orion::{kex::*, aead::*};
 use quick_protobuf::deserialize_from_slice;
 
 #[derive(Clone, Debug, Copy)]
@@ -21,7 +22,7 @@ pub struct TelekeyConfig {
     hostname: String,
     update_screen: bool,
     refresh_latency: Option<usize>,
-    cold_run: bool
+    cold_run: bool,
 }
 
 #[allow(dead_code)]
@@ -207,8 +208,11 @@ impl Telekey {
                 version: 1, session_id: Some(secret), remote: None,
                 state: TelekeyState::Idle, enigo: Enigo::new()
             };
-            let stream: TcpTranspport = stream.into();
-            if let Err(e) = telekey.listen_loop(stream) {
+            let stream: TcpTransport = stream.into();
+            //let session = EphemeralServerSession::new()?;
+            let mut stream = telekey.handshake(stream/*,
+                (&session.public_key(), &session.private_key())*/)?;
+            if let Err(e) = telekey.wait_for_input(&mut stream) {
                 println!("{}: {}", style("ERROR").red().bold(), e);
             }
         }
@@ -226,8 +230,10 @@ impl Telekey {
                 };
                 println!("{} connected to the server!",
                     style("Successfully").green().bold());
-                let mut stream: TcpTranspport = stream.into();
-                telekey.handshake(&mut stream)?;
+                let stream: TcpTransport = stream.into();
+                //let session = EphemeralClientSession::new()?;
+                let stream = telekey.handshake(stream/*,
+                    (&session.public_key(), &session.private_key())*/)?;
 
                 if let Err(e) = telekey.listen_loop(stream) {
                     println!("{}: {}", style("ERROR").red().bold(), e);
@@ -243,22 +249,68 @@ impl Telekey {
         }
     }
 
-    fn handshake<T: TelekeyTransport>(&self, tr: &mut T) -> io::Result<()> {
-        let mut inp = String::new();
-        print!("Please enter token to continue: ");
-        io::stdout().flush()?;
-        io::stdin().read_line(&mut inp)?;
-        let bytes = inp.trim().as_bytes();
-        if bytes.len() != 8 {
-            return Err(Error::new(ErrorKind::Other, "Invalid token"));
-        }
+    /*
+    fn sec_handshake<T: TelekeyTransport>(&self, tr: &mut T, kp: (&PublicKey, &PrivateKey)) -> io::Result<KexTransport> {
+        todo!()
+    }*/
 
-        let p = HandshakeRequest {
-            hostname: Cow::Borrowed(&self.config.hostname),
-            version: self.version,
-            token: Cow::Borrowed(bytes)
+    fn handshake(&mut self, mut tr: TcpTransport) -> io::Result<TcpTransport> {
+        let Ok(target_ip) = tr.peer_addr() else {
+            tr.shutdown()?;
+            return Err(Error::new(ErrorKind::NotConnected, "Unknown peer"));
         };
-        tr.send_packet(p.into())
+        if matches!(self.mode, TelekeyMode::Server(_)) {
+            let expected = self.session_id.as_ref()
+                .expect("Server must have a valid session ID");
+            let p = tr.recv_packet()?;
+            let msg: HandshakeRequest = deserialize_from_slice(p.data())
+                .expect("Cannot read HandshakeRequest message");
+            let token: &[u8] = &msg.token;
+            if expected != token {
+                tr.shutdown()?;
+                return Err(Error::new(ErrorKind::NotConnected,
+                        "Invalid secret"));
+            }
+            tr.send_packet(HandshakeResponse {
+                hostname: Cow::Borrowed(&self.config.hostname),
+                version: self.version,
+                pkey: Cow::Borrowed(&[])
+            }.into())?;
+            self.remote = Some(msg.into());
+
+            Ok(tr)
+        } else {
+            let mut inp = String::new();
+            print!("Please enter token to continue: ");
+            io::stdout().flush()?;
+            io::stdin().read_line(&mut inp)?;
+            let bytes = inp.trim().as_bytes();
+            if bytes.len() != 8 {
+                return Err(Error::new(ErrorKind::Other, "Invalid token"));
+            }
+
+            let p = HandshakeRequest {
+                hostname: Cow::Borrowed(&self.config.hostname),
+                version: self.version,
+                token: Cow::Borrowed(bytes),
+                pkey: Cow::Borrowed(&[])
+            };
+            tr.send_packet(p.into())?;
+
+            println!("Waiting for response");
+            let p = tr.recv_packet()?;
+            println!("Got response");
+            let msg: HandshakeResponse = deserialize_from_slice(p.data())
+                .expect("Cannot read HandshakeResponse message");
+            self.remote = Some(TelekeyRemote {
+                hostname: msg.hostname.to_string(),
+                version: msg.version,
+                mode: TelekeyMode::Server(target_ip.port()),
+            });
+            println!("{}{}", self.print_header(Some(target_ip)),
+                style(" ACTIVE ").on_green().black());
+            Ok(tr)
+        }
     }
 
     fn listen_loop<T: TelekeyTransport>(&mut self, mut tr: T) -> io::Result<()> {
@@ -271,44 +323,7 @@ impl Telekey {
     fn handle_packet<T: TelekeyTransport>(&mut self, tr: &mut T, p: TelekeyPacket)
         -> io::Result<()> {
         match p.kind() {
-            TelekeyPacketKind::Handshake => {
-                if self.remote.is_some() {
-                    return Ok(());
-                }
-                let Ok(target_ip) = tr.peer_addr() else {
-                    return tr.shutdown();
-                };
-                if self.is_server() {
-                    let msg: HandshakeRequest = deserialize_from_slice(p.data())
-                        .expect("Cannot read HandshakeRequest message");
-                    let expected = self.session_id.as_ref()
-                        .expect("Server must have a valid session ID");
-                    let token: &[u8] = &msg.token;
-                    if expected != token {
-                        tr.shutdown()?;
-                        return Err(Error::new(ErrorKind::NotConnected,
-                                "Invalid secret"));
-                    }
-                    tr.send_packet(HandshakeResponse {
-                        hostname: Cow::Borrowed(&self.config.hostname),
-                        version: self.version
-                    }.into())?;
-                    self.remote = Some(msg.into());
-
-                    self.wait_for_input(tr)
-                } else {
-                    let msg: HandshakeResponse = deserialize_from_slice(p.data())
-                        .expect("Cannot read HandshakeResponse message");
-                    self.remote = Some(TelekeyRemote {
-                        hostname: msg.hostname.to_string(),
-                        version: msg.version,
-                        mode: TelekeyMode::Server(target_ip.port()),
-                    });
-                    println!("{}{}", self.print_header(Some(target_ip)),
-                        style(" ACTIVE ").on_green().black());
-                    Ok(())
-                }
-            },
+            TelekeyPacketKind::Handshake => unreachable!("Handshake should no be sent at this point"),
             TelekeyPacketKind::KeyEvent => {
                 if self.remote.is_none() {
                     return tr.shutdown();

@@ -102,6 +102,7 @@ pub struct HandshakeRequest<'a> {
     pub hostname: Cow<'a, str>,
     pub version: u32,
     pub token: Cow<'a, [u8]>,
+    pub pkey: Cow<'a, [u8]>,
 }
 
 impl<'a> MessageRead<'a> for HandshakeRequest<'a> {
@@ -112,6 +113,7 @@ impl<'a> MessageRead<'a> for HandshakeRequest<'a> {
                 Ok(10) => msg.hostname = r.read_string(bytes).map(Cow::Borrowed)?,
                 Ok(21) => msg.version = r.read_fixed32(bytes)?,
                 Ok(26) => msg.token = r.read_bytes(bytes).map(Cow::Borrowed)?,
+                Ok(26) => msg.pkey = r.read_bytes(bytes).map(Cow::Borrowed)?,
                 Ok(t) => { r.read_unknown(bytes, t)?; }
                 Err(e) => return Err(e),
             }
@@ -126,12 +128,14 @@ impl<'a> MessageWrite for HandshakeRequest<'a> {
         + if self.hostname == "" { 0 } else { 1 + sizeof_len((&self.hostname).len()) }
         + if self.version == 0u32 { 0 } else { 1 + 4 }
         + if self.token == Cow::Borrowed(b"") { 0 } else { 1 + sizeof_len((&self.token).len()) }
+        + if self.pkey == Cow::Borrowed(b"") { 0 } else { 1 + sizeof_len((&self.pkey).len()) }
     }
 
     fn write_message<W: WriterBackend>(&self, w: &mut Writer<W>) -> Result<()> {
         if self.hostname != "" { w.write_with_tag(10, |w| w.write_string(&**&self.hostname))?; }
         if self.version != 0u32 { w.write_with_tag(21, |w| w.write_fixed32(*&self.version))?; }
         if self.token != Cow::Borrowed(b"") { w.write_with_tag(26, |w| w.write_bytes(&**&self.token))?; }
+        if self.pkey != Cow::Borrowed(b"") { w.write_with_tag(26, |w| w.write_bytes(&**&self.pkey))?; }
         Ok(())
     }
 }
@@ -140,6 +144,7 @@ impl<'a> MessageWrite for HandshakeRequest<'a> {
 pub struct HandshakeResponse<'a> {
     pub hostname: Cow<'a, str>,
     pub version: u32,
+    pub pkey: Cow<'a, [u8]>,
 }
 
 impl<'a> MessageRead<'a> for HandshakeResponse<'a> {
@@ -149,6 +154,7 @@ impl<'a> MessageRead<'a> for HandshakeResponse<'a> {
             match r.next_tag(bytes) {
                 Ok(10) => msg.hostname = r.read_string(bytes).map(Cow::Borrowed)?,
                 Ok(21) => msg.version = r.read_fixed32(bytes)?,
+                Ok(26) => msg.pkey = r.read_bytes(bytes).map(Cow::Borrowed)?,
                 Ok(t) => { r.read_unknown(bytes, t)?; }
                 Err(e) => return Err(e),
             }
@@ -162,11 +168,13 @@ impl<'a> MessageWrite for HandshakeResponse<'a> {
         0
         + if self.hostname == "" { 0 } else { 1 + sizeof_len((&self.hostname).len()) }
         + if self.version == 0u32 { 0 } else { 1 + 4 }
+        + if self.pkey == Cow::Borrowed(b"") { 0 } else { 1 + sizeof_len((&self.pkey).len()) }
     }
 
     fn write_message<W: WriterBackend>(&self, w: &mut Writer<W>) -> Result<()> {
         if self.hostname != "" { w.write_with_tag(10, |w| w.write_string(&**&self.hostname))?; }
         if self.version != 0u32 { w.write_with_tag(21, |w| w.write_fixed32(*&self.version))?; }
+        if self.pkey != Cow::Borrowed(b"") { w.write_with_tag(26, |w| w.write_bytes(&**&self.pkey))?; }
         Ok(())
     }
 }
