@@ -22,13 +22,14 @@ impl From<u8> for TelekeyPacketKind {
     }
 }
 
-impl Into<u8> for TelekeyPacketKind {
-    fn into(self) -> u8 {
-        match self {
-            Self::Handshake => 0,
-            Self::KeyEvent => 1,
-            Self::Ping => 2,
-            Self::Unknown => 255
+impl From<TelekeyPacketKind> for u8 {
+    fn from(kind: TelekeyPacketKind) -> Self {
+        use TelekeyPacketKind::*;
+        match kind {
+            Handshake => 0,
+            KeyEvent => 1,
+            Ping => 2,
+            Unknown => 255
         }
     }
 }
