@@ -42,7 +42,7 @@ pub struct TelekeyPacket {
 
 impl TelekeyPacket {
     pub fn new<T: MessageWrite>(kind: TelekeyPacketKind, msg: T) -> Self {
-        let len = msg.get_size() + 1;
+        let len = msg.get_size() + 1 + 1; // the last +1 accounts for the packet type
         let mut payload: Vec<u8> = Vec::with_capacity(len);
         Writer::new(&mut payload).write_message(&msg)
             .expect("The payload should have been large enough");

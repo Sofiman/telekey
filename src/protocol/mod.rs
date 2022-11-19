@@ -5,10 +5,22 @@ use crate::transport::*;
 use chrono::{Utc, Duration};
 use enigo::{Enigo, KeyboardControllable};
 use console::{Term, style};
-use std::{io::{self, Write, Error, ErrorKind}, net::*, borrow::Cow};
+use std::{io::{self, Write}, net::*, borrow::Cow};
+use anyhow::{Result, Context, bail, anyhow};
 use std::collections::VecDeque;
 use orion::kex::*;
 use quick_protobuf::deserialize_from_slice;
+
+/*
+#[macro_export]
+macro_rules! prof {
+    ($tag:literal, $body:block) => {
+        let _s = std::time::Instant::now();
+        let _res = $body;
+        println!("{} -- {:?}", $tag, _s.elapsed());
+    };
+}
+*/
 
 #[derive(Clone, Debug, Copy)]
 pub enum TelekeyMode {
@@ -200,7 +212,7 @@ impl Telekey {
         matches!(self.mode, TelekeyMode::Server(_))
     }
 
-    pub fn serve(port: u16, config: TelekeyConfig) -> io::Result<()> {
+    pub fn serve(port: u16, config: TelekeyConfig) -> Result<()> {
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
         let listener = TcpListener::bind(addr)?;
         println!("Server listenning on {} as `{}`", addr, config.hostname);
@@ -212,28 +224,26 @@ impl Telekey {
         };
         // accept connections and process them serially
         for stream in listener.incoming().flatten() {
-            let skey = SecretKey::generate(32).unwrap();
+            let skey = SecretKey::generate(32)
+                .context("Failed to generate session secret")?;
             println!("Enter this token to confirm: {}",
                  base64::encode(skey.unprotected_as_bytes()));
+
             let stream: TcpTransport = stream.into();
             if telekey.config.secure {
                 let mut stream = telekey.sec_handshake(stream, skey)?;
-                if let Err(e) = telekey.wait_for_input(&mut stream) {
-                    println!("{}: {}", style("ERROR").red().bold(), e);
-                }
+                telekey.wait_for_input(&mut stream)?;
             } else {
                 let mut stream = telekey.handshake(stream, skey)?;
-                if let Err(e) = telekey.wait_for_input(&mut stream) {
-                    println!("{}: {}", style("ERROR").red().bold(), e);
-                }
+                telekey.wait_for_input(&mut stream)?;
             }
+            telekey.remote = None;
             telekey.state = TelekeyState::Idle;
         }
         Ok(())
     }
 
-    pub fn connect_to(addr: SocketAddr, config: TelekeyConfig)
-        -> io::Result<()> {
+    pub fn connect_to(addr: SocketAddr, config: TelekeyConfig) -> Result<()> {
         match TcpStream::connect(addr) {
             Ok(stream) => {
                 let mut telekey = Telekey {
@@ -251,17 +261,17 @@ impl Telekey {
 
                 let inp = inp.trim();
                 if inp.len() >= 46 {
-                    return Err(Error::new(ErrorKind::Other, "Invalid token"));
+                    bail!("Invalid token");
                 }
-                let bytes = base64::decode(inp).and_then(|b| TryInto::<[u8; 32]>::try_into(b)
-                   .map_err(|_| base64::DecodeError::InvalidLength));
-                if bytes.is_err() {
-                    return Err(Error::new(ErrorKind::Other, "Invalid token"));
-                }
-                let skey = SecretKey::from_slice(&bytes.unwrap()).unwrap();
+                let bytes = base64::decode(inp).context("Failed to parse token")?;
+                let bytes: [u8; 32] = bytes.try_into()
+                    .map_err(|_| anyhow!("Received an incorrectly sized key"))?;
+                let skey = SecretKey::from_slice(&bytes)
+                    .context("Could not create secret key")?;
 
                 if telekey.config.secure {
-                    let stream = telekey.sec_handshake(stream, skey)?;
+                    let stream = telekey.sec_handshake(stream, skey)
+                        .context("Secure handshake failed")?;
 
                     println!("{}{}", telekey.print_header(stream.peer_addr().ok()),
                         style(" ACTIVE ").on_green().black());
@@ -270,7 +280,8 @@ impl Telekey {
                         println!("{}: {}", style("ERROR").red().bold(), e);
                     }
                 } else {
-                    let stream = telekey.handshake(stream, skey)?;
+                    let stream = telekey.handshake(stream, skey)
+                        .context("Handshake failed")?;
 
                     println!("{}{}", telekey.print_header(stream.peer_addr().ok()),
                         style(" ACTIVE ").on_green().black());
@@ -283,29 +294,31 @@ impl Telekey {
                 Ok(())
             },
             Err(e) => {
-                println!("{}: Couldn't connect to server...",
-                         style("ERROR").red().bold());
-                Err(e)
+                bail!("{}: Couldn't connect to server: {}",
+                         style("ERROR").red().bold(), e)
             }
         }
     }
 
-    fn sec_handshake(&mut self, mut tr: TcpTransport, skey: SecretKey) -> io::Result<KexTransport> {
+    fn sec_handshake(&mut self, mut tr: TcpTransport, skey: SecretKey) -> Result<KexTransport> {
         let Ok(target_ip) = tr.peer_addr() else {
-            tr.shutdown()?;
-            return Err(Error::new(ErrorKind::NotConnected, "Unknown peer"));
+            tr.shutdown().context("Failed to close socket (Unknown peer)")?;
+            bail!("Unknown peer");
         };
         if matches!(self.mode, TelekeyMode::Server(_)) {
-            let session = EphemeralServerSession::new().unwrap();
+            let session = EphemeralServerSession::new()
+                .context("Failed to generate ephemeral key pair securely")?;
 
-            let p = tr.recv_packet()?;
+            let p = tr.recv_packet().context("Failed to receive handshake")?;
             let msg: HandshakeRequest = deserialize_from_slice(p.data())
-                .expect("Cannot read HandshakeRequest message");
-            let key = orion::aead::open(&skey, &msg.pkey).unwrap();
-            let key: [u8; 32] = key.try_into().unwrap();
+                .context("Failed to decode HandshakeRequest message")?;
+            let key = orion::aead::open(&skey, &msg.pkey)
+                .context("Could not open client public key with session secret")?;
+            let key: [u8; 32] = key.try_into()
+                .map_err(|_| anyhow!("Received an incorrectly sized key"))?;
 
             let pkey = orion::aead::seal(&skey, &session.public_key().to_bytes())
-                .unwrap();
+                .context("Failed to seal public key using session secret")?;
             tr.send_packet(HandshakeResponse {
                 hostname: Cow::Borrowed(&self.config.hostname),
                 version: self.version,
@@ -314,13 +327,14 @@ impl Telekey {
             self.remote = Some(msg.clone().into());
 
             let server_keys: SessionKeys = session
-                .establish_with_client(&key.into()).unwrap();
-            println!("Key exchange successful!");
+                .establish_with_client(&key.into())
+                .context("Key exchange failed")?;
             Ok(KexTransport::new(tr.into(), server_keys))
         } else {
-            let session = EphemeralClientSession::new().unwrap();
+            let session = EphemeralClientSession::new()
+                .context("Failed to generate ephemeral key pair securely")?;
             let pkey = orion::aead::seal(&skey, &session.public_key().to_bytes())
-                .unwrap();
+                .context("Failed to seal public key using session secret")?;
             tr.send_packet(HandshakeRequest {
                 hostname: Cow::Borrowed(&self.config.hostname),
                 version: self.version,
@@ -330,36 +344,37 @@ impl Telekey {
 
             let p = tr.recv_packet()?;
             let msg: HandshakeResponse = deserialize_from_slice(p.data())
-                .expect("Cannot read HandshakeResponse message");
+                .context("Failed to decode HandshakeResponse message")?;
             self.remote = Some(TelekeyRemote {
                 hostname: msg.hostname.to_string(),
                 version: msg.version,
                 mode: TelekeyMode::Server(target_ip.port()),
             });
 
-            let key = orion::aead::open(&skey, &msg.pkey).unwrap();
-            let key: [u8; 32] = key.try_into().unwrap();
+            let key = orion::aead::open(&skey, &msg.pkey)
+                .context("Could not open server public key with session secret")?;
+            let key: [u8; 32] = key.try_into()
+                .map_err(|_| anyhow!("Received an incorrectly sized key"))?;
             let client_keys: SessionKeys = session
-                .establish_with_server(&key.into()).unwrap();
-            println!("Key exchange successful!");
+                .establish_with_server(&key.into())
+                .context("Key exchange failed")?;
             Ok(KexTransport::new(tr.into(), client_keys))
         }
     }
 
-    fn handshake(&mut self, mut tr: TcpTransport, secret: SecretKey) -> io::Result<TcpTransport> {
+    fn handshake(&mut self, mut tr: TcpTransport, secret: SecretKey) -> Result<TcpTransport> {
         let Ok(target_ip) = tr.peer_addr() else {
-            tr.shutdown()?;
-            return Err(Error::new(ErrorKind::NotConnected, "Unknown peer"));
+            tr.shutdown().context("Failed to close socket (Unknown peer)")?;
+            bail!("Unknown peer");
         };
         if matches!(self.mode, TelekeyMode::Server(_)) {
             let p = tr.recv_packet()?;
             let msg: HandshakeRequest = deserialize_from_slice(p.data())
-                .expect("Cannot read HandshakeRequest message");
+                .context("Failed to decode HandshakeRequest message")?;
             let token: &[u8] = &msg.token;
             if secret != token {
-                tr.shutdown()?;
-                return Err(Error::new(ErrorKind::NotConnected,
-                        "Invalid secret"));
+                tr.shutdown().context("Failed to close socket (Invalid secret)")?;
+                bail!("Invalid secret");
             }
             tr.send_packet(HandshakeResponse {
                 hostname: Cow::Borrowed(&self.config.hostname),
@@ -380,7 +395,7 @@ impl Telekey {
 
             let p = tr.recv_packet()?;
             let msg: HandshakeResponse = deserialize_from_slice(p.data())
-                .expect("Cannot read HandshakeResponse message");
+                .context("Failed to decode HandshakeResponse message")?;
             self.remote = Some(TelekeyRemote {
                 hostname: msg.hostname.to_string(),
                 version: msg.version,
@@ -390,7 +405,7 @@ impl Telekey {
         }
     }
 
-    fn listen_loop<T: TelekeyTransport>(&mut self, mut tr: T) -> io::Result<()> {
+    fn listen_loop<T: TelekeyTransport>(&mut self, mut tr: T) -> Result<()> {
         loop {
             let p = tr.recv_packet()?;
             self.handle_packet(&mut tr, p)?;
@@ -398,16 +413,17 @@ impl Telekey {
     }
 
     fn handle_packet<T: TelekeyTransport>(&mut self, tr: &mut T, p: TelekeyPacket)
-        -> io::Result<()> {
+        -> Result<()> {
         match p.kind() {
-            TelekeyPacketKind::Handshake => unreachable!("Handshake should no be sent at this point"),
+            TelekeyPacketKind::Handshake => Ok(()), // Handshake should no be sent at this point
             TelekeyPacketKind::KeyEvent => {
                 if self.remote.is_none() {
-                    return tr.shutdown();
+                    return tr.shutdown()
+                        .context("Received KeyEvent but the sender is unknown");
                 }
                 if !self.is_server() {
                     let msg: KeyEvent = deserialize_from_slice(p.data())
-                        .expect("Cannot read KeyEvent message");
+                        .context("Failed to decode KeyEvent message")?;
 
                     if self.config.cold_run {
                         print!("{}", msg);
@@ -430,8 +446,10 @@ impl Telekey {
             },
             TelekeyPacketKind::Ping => {
                 let tm = Utc::now().timestamp_nanos();
-                let buf: Vec<u8> = tm.to_be_bytes().to_vec();
+                let mut buf = tm.to_be_bytes().to_vec();
+                buf.reserve(1);
                 tr.send_packet(TelekeyPacket::raw(TelekeyPacketKind::Ping, buf))
+                    .context("Could not respond to ping packet")
             }
             k => {
                 println!("{}: Unknown packet {:?}",
@@ -441,7 +459,7 @@ impl Telekey {
         }
     }
 
-    fn measure_latency<T: TelekeyTransport>(tr: &mut T) -> io::Result<i64> {
+    fn measure_latency<T: TelekeyTransport>(tr: &mut T) -> Result<i64> {
         let start = Utc::now().timestamp_nanos();
         tr.send_packet(TelekeyPacket::raw(TelekeyPacketKind::Ping,
                 Vec::with_capacity(1)))?;
@@ -455,8 +473,7 @@ impl Telekey {
                 Ok((d1 + d2) / 2)
             },
             k => {
-                let err = format!("Expected ping packet received {:?}", k);
-                Err(Error::new(ErrorKind::InvalidData, err))
+                bail!("Expected ping packet received {:?}", k)
             }
         }
     }
@@ -492,7 +509,7 @@ impl Telekey {
         println!("{}", style("--> Press any key <--").color256(246));
     }
 
-    fn wait_for_input<T: TelekeyTransport>(&mut self, tr: &mut T) -> io::Result<()> {
+    fn wait_for_input<T: TelekeyTransport>(&mut self, tr: &mut T) -> Result<()> {
         let header = self.print_header(tr.peer_addr().ok());
         let term = Term::stdout();
 

@@ -1,8 +1,9 @@
 mod protocol;
 use crate::protocol::*;
+use anyhow::Result;
 use std::{io::{self, Write}, env};
 
-fn main() -> std::io::Result<()> {
+fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
     let (conf, mode) = parse_args(args);
     match mode {

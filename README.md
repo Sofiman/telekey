@@ -35,6 +35,6 @@ Available options:
 # Todo
 - [x] Graphical User Interface
 - [x] End-to-end encryption
-- [ ] Improve End-to-end encryption to prevent key-dictating attacks
+- [x] Improve End-to-end encryption to prevent key-dictating attacks
 - [ ] Command Line Interface
 - [ ] Add missing keys
