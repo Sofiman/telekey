@@ -12,3 +12,7 @@ chrono = { version = "0.4.23", features = ["clock", "std"], default-features = f
 enigo = { git = "https://github.com/NaokiM03/enigo.git" }
 orion = "0.17.2"
 anyhow = "1.0.66"
+
+[profile.release]
+lto = true
+opt-level = "z"

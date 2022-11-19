@@ -230,12 +230,16 @@ impl Telekey {
                  base64::encode(skey.unprotected_as_bytes()));
 
             let stream: TcpTransport = stream.into();
-            if telekey.config.secure {
+            let r = if telekey.config.secure {
                 let mut stream = telekey.sec_handshake(stream, skey)?;
-                telekey.wait_for_input(&mut stream)?;
+                telekey.wait_for_input(&mut stream)
             } else {
                 let mut stream = telekey.handshake(stream, skey)?;
-                telekey.wait_for_input(&mut stream)?;
+                telekey.wait_for_input(&mut stream)
+            };
+            if let Err(e) = r {
+                eprintln!("{}: Session closed", style("ERROR").red().bold());
+                eprintln!("{:?}", e);
             }
             telekey.remote = None;
             telekey.state = TelekeyState::Idle;
