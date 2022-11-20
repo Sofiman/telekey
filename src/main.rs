@@ -23,7 +23,7 @@ fn parse_args() -> Result<(SocketAddr, TelekeyMode, TelekeyConfig)> {
         match arg {
             Short('s') | Long("serve") => {
                 let ip: String = parser.value()?.parse()?;
-                bind = Some(SocketAddr::from_str(&ip)
+                bind = Some(parse_ip(&ip)
                      .context("Invalid IP address to bind")?);
             }
             Short('t') | Long("target-ip") => {
@@ -63,7 +63,7 @@ Secure remote keyboard interface over TCP.
   -u, --unsecure               Unsecure mode. No encryption: use it at your own risk!
   -h, --help                   Print help information
   -v, --version                Print version information",
-  style("TeleKey").color256(173).italic(), VERSION.unwrap_or("Unknown"),
+  style("TeleKey").color256(173).italic(), style(VERSION.unwrap_or("Unknown")).yellow(),
   style("Usage:").underlined(), style("Options:").underlined());
                 std::process::exit(0);
             }
