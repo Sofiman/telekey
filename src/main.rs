@@ -40,7 +40,7 @@ fn parse_args() -> Result<(SocketAddr, TelekeyMode, TelekeyConfig)> {
             Short('u') | Long("unsecure") => {
                 config.set_secure(false);
             }
-            Short('l') | Long("update-latency") => {
+            Short('l') | Long("refresh-latency") => {
                 let n: usize = parser.value()?.parse()?;
                 config.set_refresh_latency(if n == 0 { None } else { Some(n) });
             }
@@ -56,10 +56,11 @@ Secure remote keyboard interface over TCP.
 {} telekey.exe [OPTIONS]
 
 {}
-  -t, --target-ip <TARGET_IP>  [Runs telekey as client] Defines the target address to connect to [defaults to 127.0.0.1:8384]
-  -s, --serve <BIND_IP>        [Runs telekey as server] TCP port to listen to (default port is 8384)
+  -t, --target-ip <IP[:PORT]>  [Runs telekey as client] Defines the target address to connect to [defaults to 127.0.0.1:8384]
+  -s, --serve <IP[:PORT]>      [Runs telekey as server] TCP port to listen to [default port is 8384]
   -m, --simple-menu            If enabled, server's menu will only show minimal information and only update latency
   -c, --cold-run               If enabled, the key presses will be printed to the standard output rather than being emulated
+  -l, --refresh-latency <n>    Triggers a latency check after n keys. Use 0 to disable latency checks. [defaults to 20]
   -u, --unsecure               Unsecure mode. No encryption: use it at your own risk!
   -h, --help                   Print help information
   -v, --version                Print version information",
