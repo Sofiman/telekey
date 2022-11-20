@@ -36,5 +36,5 @@ Available options:
 - [x] Graphical User Interface
 - [x] End-to-end encryption
 - [x] Improve End-to-end encryption to prevent key-dictating attacks
-- [ ] Command Line Interface
+- [x] Command Line Interface
 - [ ] Add missing keys

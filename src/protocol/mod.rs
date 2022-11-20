@@ -11,6 +11,8 @@ use std::collections::VecDeque;
 use orion::kex::*;
 use quick_protobuf::deserialize_from_slice;
 
+pub const VERSION: Option<&str> = option_env!("CARGO_PKG_VERSION");
+
 /*
 #[macro_export]
 macro_rules! prof {
@@ -25,7 +27,7 @@ macro_rules! prof {
 #[derive(Clone, Debug, Copy)]
 pub enum TelekeyMode {
     Client,
-    Server(u16)
+    Server
 }
 
 #[derive(Clone, Debug)]
@@ -209,16 +211,15 @@ pub struct Telekey {
 
 impl Telekey {
     pub fn is_server(&self) -> bool {
-        matches!(self.mode, TelekeyMode::Server(_))
+        matches!(self.mode, TelekeyMode::Server)
     }
 
-    pub fn serve(port: u16, config: TelekeyConfig) -> Result<()> {
-        let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    pub fn serve(addr: SocketAddr, config: TelekeyConfig) -> Result<()> {
         let listener = TcpListener::bind(addr)?;
         println!("Server listenning on {} as `{}`", addr, config.hostname);
 
         let mut telekey = Telekey {
-            config, mode: TelekeyMode::Server(port),
+            config, mode: TelekeyMode::Server,
             version: 1, remote: None,
             state: TelekeyState::Idle, enigo: Enigo::new()
         };
@@ -248,6 +249,7 @@ impl Telekey {
     }
 
     pub fn connect_to(addr: SocketAddr, config: TelekeyConfig) -> Result<()> {
+        println!("Connecting to remote...");
         match TcpStream::connect(addr) {
             Ok(stream) => {
                 let mut telekey = Telekey {
@@ -305,11 +307,7 @@ impl Telekey {
     }
 
     fn sec_handshake(&mut self, mut tr: TcpTransport, skey: SecretKey) -> Result<KexTransport> {
-        let Ok(target_ip) = tr.peer_addr() else {
-            tr.shutdown().context("Failed to close socket (Unknown peer)")?;
-            bail!("Unknown peer");
-        };
-        if matches!(self.mode, TelekeyMode::Server(_)) {
+        if matches!(self.mode, TelekeyMode::Server) {
             let session = EphemeralServerSession::new()
                 .context("Failed to generate ephemeral key pair securely")?;
 
@@ -352,7 +350,7 @@ impl Telekey {
             self.remote = Some(TelekeyRemote {
                 hostname: msg.hostname.to_string(),
                 version: msg.version,
-                mode: TelekeyMode::Server(target_ip.port()),
+                mode: TelekeyMode::Server,
             });
 
             let key = orion::aead::open(&skey, &msg.pkey)
@@ -367,11 +365,7 @@ impl Telekey {
     }
 
     fn handshake(&mut self, mut tr: TcpTransport, secret: SecretKey) -> Result<TcpTransport> {
-        let Ok(target_ip) = tr.peer_addr() else {
-            tr.shutdown().context("Failed to close socket (Unknown peer)")?;
-            bail!("Unknown peer");
-        };
-        if matches!(self.mode, TelekeyMode::Server(_)) {
+        if matches!(self.mode, TelekeyMode::Server) {
             let p = tr.recv_packet()?;
             let msg: HandshakeRequest = deserialize_from_slice(p.data())
                 .context("Failed to decode HandshakeRequest message")?;
@@ -403,7 +397,7 @@ impl Telekey {
             self.remote = Some(TelekeyRemote {
                 hostname: msg.hostname.to_string(),
                 version: msg.version,
-                mode: TelekeyMode::Server(target_ip.port()),
+                mode: TelekeyMode::Server,
             });
             Ok(tr)
         }
