@@ -480,9 +480,10 @@ impl Telekey {
     {
         let name = style(format!("TeleKey v{} ", self.version))
             .color256(173).italic();
-        let Some(peer_addr) = peer_addr else {
+        if peer_addr.is_none() {
             return format!("{}{}", name, style("!! Unkown peer !!").on_red());
         };
+        let peer_addr = peer_addr.unwrap();
         let peer = if let Some(remote) = &self.remote {
             style(format!(" {} ({}) ", peer_addr, remote.hostname))
         } else {
