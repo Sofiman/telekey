@@ -2,13 +2,18 @@ use std::{io::{self, Write, Read}, net::{TcpStream, SocketAddr}};
 use quick_protobuf::{MessageWrite, Writer};
 use orion::{kex::SessionKeys, aead};
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum TelekeyPacketKind {
-    #[default]
     Unknown,
     Handshake,
     KeyEvent,
     Ping
+}
+
+impl Default for TelekeyPacketKind {
+    fn default() -> Self {
+        Self::Unknown
+    }
 }
 
 impl From<u8> for TelekeyPacketKind {
@@ -123,18 +128,18 @@ impl From<TcpTransport> for TcpStream {
     }
 }
 
-pub struct KexTransport {
+pub struct SecureTransport {
     stream: TcpStream,
     keys: SessionKeys
 }
 
-impl KexTransport {
+impl SecureTransport {
     pub fn new(stream: TcpStream, keys: SessionKeys) -> Self {
         Self { stream, keys }
     }
 }
 
-impl TelekeyTransport for KexTransport {
+impl TelekeyTransport for SecureTransport {
     fn recv_packet(&mut self) -> io::Result<TelekeyPacket> {
         let mut header = [0u8; 4];
         self.stream.read_exact(&mut header)?;

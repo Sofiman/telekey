@@ -116,9 +116,8 @@ impl From<KeyEvent> for TelekeyPacket {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 enum TelekeyState {
-    #[default]
     Idle,
     Active
 }
@@ -306,7 +305,7 @@ impl Telekey {
         }
     }
 
-    fn sec_handshake(&mut self, mut tr: TcpTransport, skey: SecretKey) -> Result<KexTransport> {
+    fn sec_handshake(&mut self, mut tr: TcpTransport, skey: SecretKey) -> Result<SecureTransport> {
         if matches!(self.mode, TelekeyMode::Server) {
             let session = EphemeralServerSession::new()
                 .context("Failed to generate ephemeral key pair securely")?;
@@ -331,7 +330,7 @@ impl Telekey {
             let server_keys: SessionKeys = session
                 .establish_with_client(&key.into())
                 .context("Key exchange failed")?;
-            Ok(KexTransport::new(tr.into(), server_keys))
+            Ok(SecureTransport::new(tr.into(), server_keys))
         } else {
             let session = EphemeralClientSession::new()
                 .context("Failed to generate ephemeral key pair securely")?;
@@ -360,7 +359,7 @@ impl Telekey {
             let client_keys: SessionKeys = session
                 .establish_with_server(&key.into())
                 .context("Key exchange failed")?;
-            Ok(KexTransport::new(tr.into(), client_keys))
+            Ok(SecureTransport::new(tr.into(), client_keys))
         }
     }
 
