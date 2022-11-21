@@ -57,7 +57,7 @@ Secure remote keyboard interface over TCP.
 
 {}
   -t, --target-ip <IP[:PORT]>  [Runs telekey as client] Defines the target address to connect to [defaults to 127.0.0.1:8384]
-  -s, --serve <IP[:PORT]>      [Runs telekey as server] TCP port to listen to [default port is 8384]
+  -s, --serve <IP[:PORT]>      [Runs telekey as server] IP address to start a TCP Listener on [default port is 0.0.0.0:8384]
   -m, --simple-menu            If enabled, server's menu will only show minimal information and only update latency
   -c, --cold-run               If enabled, the key presses will be printed to the standard output rather than being emulated
   -l, --refresh-latency <n>    Triggers a latency check after n keys. Use 0 to disable latency checks. [defaults to 20]

@@ -18,6 +18,9 @@ Syntax:
 $ telekey.exe [OPTIONS]
 ```
 
+Upon connecting, you will have to sync the two TeleKey instances using a
+*randomly generated* token.
+
 ### 📝 Start as client
 A Telekey Client will receive key events and emulate the key presses.
 
@@ -33,8 +36,8 @@ Telekey Server will listen and send key events to the Telekey Client.
 ```bash
 $ telekey.exe -s 0.0.0.0
 ```
-By default (without any options), TeleKey will send all keys typed in the stdin of
-the program.
+By default (without any options), TeleKey will listen for clients on *all* network adapters on port **8384**
+and will send to the connected client all keys typed in the stdin of the program.
 
 ## Options
 
@@ -42,7 +45,7 @@ Option Syntax follows the Unix-standard. Combined options and equal-seperated op
 | Usage                       | Description                                                                                                    | Default        |
 |-----------------------------|----------------------------------------------------------------------------------------------------------------|----------------|
 | -t, --target-ip <IP[:PORT]> | [Runs telekey as client] Defines the target address to connect to                                              | 127.0.0.1:8384 |
-| -s, --serve <IP[:PORT]>     | [Runs telekey as server] TCP port to listen to                                                                 | 0.0.0.0:8384   |
+| -s, --serve <IP[:PORT]>     | [Runs telekey as server] IP address to start a TCP Listener on                                                 | 0.0.0.0:8384   |
 | -m, --simple-menu           | If enabled, server's menu will only show minimal information and only update latency                           | `false`        |
 | -c, --cold-run              | If enabled, the key presses will be printed to the standard output rather than being emulated                  | `false`        |
 | -l, --refresh-latency <n>   | Triggers a latency check after `n` keys. Use **0** to disable latency checks.                                  | 20             |
