@@ -1,40 +1,83 @@
-# telekey
-Telekey is a remote keyboard interface for working on two computers at once.
-Pressed keys are encrypted using X25519 and transmitted using Protobuf over a
+# TeleKey
+
+TeleKey is a remote keyboard interface for working on two computers at once.
+Pressed keys are encrypted and transmitted using Protobuf over a
 TCP Connection.
 
-## Requirements
-- `libxdo-dev` for linux users.
+## Features
 
-# Usage
-Subject to change.
+- Connect two computers on the same local network
+- End-to-end encryption using X25519 and ChaCha-Poly1035
+- Cross platform (tested on Windows, macOS and Ubuntu)
 
-Start a server on the input machine:
-```shell
-$ cargo run -- -s
+
+## Quick Start
+
+Syntax:
+```bash
+$ telekey.exe [OPTIONS]
 ```
-This will automatically start a TCP Listener on *all* network interfaces (0.0.0.0)
-on port **8384**.
 
-To connect a client:
-```shell
-$ cargo run
-Starting client as `[HOSTNAME]`
-Enter address: [IP ADDRESS OF THE SERVER]:8384
+### 📝 Start as client
+A Telekey Client will receive key events and emulate the key presses.
+
+```bash
+$ telekey.exe -t 127.0.0.1
 ```
-To confirm the connection to the server, the token shown in the server console must be entered in the client console.
+By default (without any options), TeleKey will try to connect to **127.0.0.1:8384**.
+And all received keys will be emulated on the system (real key presses).
 
-Available options:
-| Option | Name     | Description                                                                                                    |
-|--------|----------|----------------------------------------------------------------------------------------------------------------|
-| -s     | Server   | Hosts a Telekey server.                                                                                        |
-| -c     | Cold Run | If present, the client will not try to emulate the keyboard. All received keys will be printed in the console. |
-| -r     | Raw      | If present, the Graphical User Interface will be limited to only the status bar (no history).                  |
-| -u     | Unsecure | If present, the transmitted packets will not be encryped. Use it at your own risk!                             |
+### 🧑‍💻 Start as server
+Telekey Server will listen and send key events to the Telekey Client.
 
-# Todo
+```bash
+$ telekey.exe -s 0.0.0.0
+```
+By default (without any options), TeleKey will send all keys typed in the stdin of
+the program.
+
+## Options
+
+Option Syntax follows the Unix-standard. Combined options and equal-seperated options are accepted.
+| Usage                       | Description                                                                                                    | Default        |
+|-----------------------------|----------------------------------------------------------------------------------------------------------------|----------------|
+| -t, --target-ip <IP[:PORT]> | [Runs telekey as client] Defines the target address to connect to                                              | 127.0.0.1:8384 |
+| -s, --serve <IP[:PORT]>     | [Runs telekey as server] TCP port to listen to                                                                 | 0.0.0.0:8384   |
+| -m, --simple-menu           | If enabled, server's menu will only show minimal information and only update latency                           | `false`        |
+| -c, --cold-run              | If enabled, the key presses will be printed to the standard output rather than being emulated                  | `false`        |
+| -l, --refresh-latency <n>   | Triggers a latency check after `n` keys. Use **0** to disable latency checks.                                  | 20             |
+| -u, --unsecure              | Unsecure mode. No encryption: use it at your own risk!                                                         | `false`        |
+| -h, --help.                 | Print help version (list of options and usage)                                                                 | N/A            |
+| -v, --version               | Print version information                                                                                      | N/A            |
+
+
+## Installation
+
+### Requirements
+- Rust version 1.60 minimum (not tested on older versions)
+
+```bash
+  cargo build
+```
+    
+## Todo
+
 - [x] Graphical User Interface
 - [x] End-to-end encryption
-- [x] Improve End-to-end encryption to prevent key-dictating attacks
+- [x] Improve End-to-end encryption to prevent key-dictating (+man in the middle) attacks
 - [x] Command Line Interface
 - [ ] Add missing keys
+
+
+## Contribution & Feedback
+
+If you have any feedback, please open an issue.
+If you encounter any bugs or unwanted behaviour, please open an issue.
+
+This projet is open to contributions, feel free to submit your pull requests!
+
+
+## License
+
+[GNU General Public License v3.0](https://choosealicense.com/licenses/gpl-3.0/)
+
