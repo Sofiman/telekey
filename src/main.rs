@@ -2,7 +2,27 @@ mod protocol;
 use crate::protocol::*;
 use std::{net::{SocketAddr, IpAddr}, str::FromStr};
 use anyhow::{Result, Context, bail};
-use console::style;
+use tui_markup_ansi_macro::ansi;
+
+const HELP: &str = ansi!("<brown TeleKey> by Sofiane Meftah
+Secure remote keyboard interface over TCP.
+
+<u Usage:> telekey.exe <yellow [OPTIONS...]>
+
+<u Options:>
+  -t, --target-ip \\<<arg IP<opt [:PORT]>>\\>  <green [Runs telekey as client]> Defines the target address to connect to. <def defaults to 127.0.0.1:8384>
+  -s, --serve \\<<arg IP<opt [:PORT]>>\\>      <green [Runs telekey as server]> IP address to start a TCP Listener on. <def defaults to 0.0.0.0:8384>
+  -m, --simple-menu            If enabled, server's menu will only show minimal information and only update latency.
+  -c, --cold-run               If enabled, the key presses will be printed to the standard output rather than being emulated.
+  -l, --refresh-latency \\<<arg N>\\>    Triggers a latency check after <arg N> keys. Use 0 to disable latency checks. <def defaults to 20>
+  -u, --unsecure               <red Unsecure mode.> <i No encryption: use it at your own risk!>
+  -h, --help                   Print help information.
+  -v, --version                Print version information.",
+  "brown" => "173",
+  "arg" => "cyan",
+  "opt" => "blue,d",
+  "def" => "magenta,i"
+);
 
 fn parse_ip(s: &str) -> Result<SocketAddr> {
     if let Ok(addr) = SocketAddr::from_str(s) {
@@ -31,15 +51,9 @@ fn parse_args() -> Result<(SocketAddr, TelekeyMode, TelekeyConfig)> {
                 target_ip = Some(parse_ip(&ip)
                      .context("Invalid target IP address")?);
             }
-            Short('m') | Long("simple-menu") => {
-                config.set_update_screen(false);
-            }
-            Short('c') | Long("cold-run") => {
-                config.set_cold_run(true);
-            }
-            Short('u') | Long("unsecure") => {
-                config.set_secure(false);
-            }
+            Short('m') | Long("simple-menu") => config.set_update_screen(false),
+            Short('c') | Long("cold-run") => config.set_cold_run(true),
+            Short('u') | Long("unsecure") => config.set_secure(false),
             Short('l') | Long("refresh-latency") => {
                 let n: usize = parser.value()?.parse()?;
                 config.set_refresh_latency(if n == 0 { None } else { Some(n) });
@@ -50,35 +64,7 @@ fn parse_args() -> Result<(SocketAddr, TelekeyMode, TelekeyConfig)> {
                 std::process::exit(0);
             }
             Short('h') | Long("help") => {
-                let n = style("N").cyan();
-                let ip = style("IP").cyan();
-                let port = style("[:PORT]").blue().dim();
-                println!("{} {} by Sofiane Meftah
-Secure remote keyboard interface over TCP.
-
-{} telekey.exe [OPTIONS]
-
-{}
-  -t, --target-ip <{}{}>  {} Defines the target address to connect to .{}
-  -s, --serve <{}{}>      {} IP address to start a TCP Listener on. {}
-  -m, --simple-menu            If enabled, server's menu will only show minimal information and only update latency.
-  -c, --cold-run               If enabled, the key presses will be printed to the standard output rather than being emulated.
-  -l, --refresh-latency <{}>    Triggers a latency check after {} keys. Use 0 to disable latency checks. {}
-  -u, --unsecure               {} No encryption: use it at your own risk!
-  -h, --help                   Print help information.
-  -v, --version                Print version information.",
-  style("TeleKey").color256(173).italic(), style(VERSION.unwrap_or("Unknown")).yellow(),
-  style("Usage:").underlined(), style("Options:").underlined(),
-  ip, port,
- style("[Runs telekey as client]").green(),
- style("defaults to 127.0.0.1:8384").magenta().italic(),
-  ip, port,
- style("[Runs telekey as server]").green(),
- style("defaults to 0.0.0.0:8384").magenta().italic(),
- n, n,
- style("defaults to 20").magenta().italic(),
- style("Unsecure mode.").red()
-  );
+                println!("{}", HELP);
                 std::process::exit(0);
             }
             _ => bail!(arg.unexpected()),

@@ -13,6 +13,7 @@ enigo = { git = "https://github.com/NaokiM03/enigo.git" }
 orion = "0.17.2"
 anyhow = "1.0.66"
 lexopt = "0.2.1"
+tui-markup-ansi-macro = "0.1.0"
 
 [profile.release]
 lto = true
