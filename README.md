@@ -30,7 +30,7 @@ $ telekey.exe -t 127.0.0.1
 By default (without any options), TeleKey will try to connect to **127.0.0.1:8384**.
 And all received keys will be emulated on the system (real key presses).
 
-### 🧑‍💻 Start as server
+### 👨‍💻 Start as server
 Telekey Server will listen and send key events to the Telekey Client.
 
 ```bash

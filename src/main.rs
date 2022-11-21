@@ -45,27 +45,40 @@ fn parse_args() -> Result<(SocketAddr, TelekeyMode, TelekeyConfig)> {
                 config.set_refresh_latency(if n == 0 { None } else { Some(n) });
             }
             Short('v') | Long("version") => {
-                println!("{} {} by Sofiane Meftah",
-     style("TeleKey").color256(173).italic(), VERSION.unwrap_or("Unknown"));
+                println!("TeleKey {} by Sofiane Meftah",
+                    VERSION.unwrap_or("Unknown"));
                 std::process::exit(0);
             }
             Short('h') | Long("help") => {
+                let n = style("N").cyan();
+                let ip = style("IP").cyan();
+                let port = style("[:PORT]").blue().dim();
                 println!("{} {} by Sofiane Meftah
 Secure remote keyboard interface over TCP.
 
 {} telekey.exe [OPTIONS]
 
 {}
-  -t, --target-ip <IP[:PORT]>  [Runs telekey as client] Defines the target address to connect to [defaults to 127.0.0.1:8384]
-  -s, --serve <IP[:PORT]>      [Runs telekey as server] IP address to start a TCP Listener on [default port is 0.0.0.0:8384]
-  -m, --simple-menu            If enabled, server's menu will only show minimal information and only update latency
-  -c, --cold-run               If enabled, the key presses will be printed to the standard output rather than being emulated
-  -l, --refresh-latency <n>    Triggers a latency check after n keys. Use 0 to disable latency checks. [defaults to 20]
-  -u, --unsecure               Unsecure mode. No encryption: use it at your own risk!
-  -h, --help                   Print help information
-  -v, --version                Print version information",
+  -t, --target-ip <{}{}>  {} Defines the target address to connect to .{}
+  -s, --serve <{}{}>      {} IP address to start a TCP Listener on. {}
+  -m, --simple-menu            If enabled, server's menu will only show minimal information and only update latency.
+  -c, --cold-run               If enabled, the key presses will be printed to the standard output rather than being emulated.
+  -l, --refresh-latency <{}>    Triggers a latency check after {} keys. Use 0 to disable latency checks. {}
+  -u, --unsecure               {} No encryption: use it at your own risk!
+  -h, --help                   Print help information.
+  -v, --version                Print version information.",
   style("TeleKey").color256(173).italic(), style(VERSION.unwrap_or("Unknown")).yellow(),
-  style("Usage:").underlined(), style("Options:").underlined());
+  style("Usage:").underlined(), style("Options:").underlined(),
+  ip, port,
+ style("[Runs telekey as client]").green(),
+ style("defaults to 127.0.0.1:8384").magenta().italic(),
+  ip, port,
+ style("[Runs telekey as server]").green(),
+ style("defaults to 0.0.0.0:8384").magenta().italic(),
+ n, n,
+ style("defaults to 20").magenta().italic(),
+ style("Unsecure mode.").red()
+  );
                 std::process::exit(0);
             }
             _ => bail!(arg.unexpected()),
