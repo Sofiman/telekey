@@ -325,7 +325,7 @@ impl Telekey {
                 version: self.version,
                 pkey: Cow::Owned(pkey)
             }.into())?;
-            self.remote = Some(msg.clone().into());
+            self.remote = Some(msg.into());
 
             let server_keys: SessionKeys = session
                 .establish_with_client(&key.into())

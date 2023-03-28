@@ -9,10 +9,10 @@ hostname = "0.3.1"
 quick-protobuf = "0.8.0"
 console = "0.15.2"
 chrono = { version = "0.4.23", features = ["clock", "std"], default-features = false }
-enigo = { git = "https://github.com/NaokiM03/enigo.git" }
+enigo = "0.1.0"
 orion = "0.17.2"
-anyhow = "1.0.66"
-lexopt = "0.2.1"
+anyhow = "1.0"
+lexopt = "0.3.0"
 tui-markup-ansi-macro = "0.1.0"
 
 [profile.release]
